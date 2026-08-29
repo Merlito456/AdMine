@@ -155,7 +155,7 @@ class SupabaseClient:
             return None
 
     def get_all_blocks(self, limit=1000):
-        """Get all blocks"""
+        """Get all blocks - FIXED: removed 'asc' parameter"""
         try:
             result = self.client.table('blocks')\
                 .select('*')\
@@ -194,6 +194,7 @@ class SupabaseClient:
 
     def generate_tx_hash(self, transaction):
         """Generate transaction hash"""
+        import hashlib
         tx_string = f"{transaction.get('from', '')}{transaction.get('to', '')}{transaction.get('amount', 0)}{transaction.get('timestamp', time.time())}"
         return hashlib.sha256(tx_string.encode()).hexdigest()
 
@@ -212,12 +213,12 @@ class SupabaseClient:
             return []
 
     def get_pending_transactions(self, limit=50):
-        """Get pending transactions"""
+        """Get pending transactions - FIXED: removed 'asc' parameter"""
         try:
             result = self.client.table('transactions')\
                 .select('*')\
                 .is_('block_index', 'null')\
-                .order('timestamp', asc=True)\
+                .order('timestamp')\
                 .limit(limit)\
                 .execute()
             return result.data
