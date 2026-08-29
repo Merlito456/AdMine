@@ -832,6 +832,112 @@ def get_app_config():
     })
 
 # ============================================
+# REFERRAL ROUTES
+# ============================================
+
+@app.route('/api/referral/create', methods=['POST'])
+def create_referral():
+    try:
+        data = request.json
+        referrer = data.get('referrer')
+        referred = data.get('referred')
+        
+        if not referrer or not referred:
+            return jsonify({"error": "Referrer and referred addresses required"}), 400
+        
+        result = supabase_client.create_referral(referrer, referred)
+        if result:
+            return jsonify({"status": "success", "referral": result})
+        return jsonify({"error": "Failed to create referral"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referral/complete', methods=['POST'])
+def complete_referral():
+    try:
+        data = request.json
+        referral_id = data.get('referral_id')
+        reward = data.get('reward', 5.0)
+        
+        if not referral_id:
+            return jsonify({"error": "Referral ID required"}), 400
+        
+        result = supabase_client.complete_referral(referral_id, reward)
+        if result:
+            return jsonify({"status": "success", "referral": result})
+        return jsonify({"error": "Failed to complete referral"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referrals/<address>', methods=['GET'])
+def get_referrals(address):
+    try:
+        referrals = supabase_client.get_referrals(address)
+        return jsonify({"address": address, "referrals": referrals, "count": len(referrals)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
+# ANALYTICS ROUTES
+# ============================================
+
+@app.route('/api/analytics/track', methods=['POST'])
+def track_analytics():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        session_id = data.get('session_id')
+        screen_name = data.get('screen_name')
+        action_type = data.get('action_type')
+        action_data = data.get('action_data', {})
+        
+        if not wallet_address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        result = supabase_client.track_analytics(
+            wallet_address, session_id, screen_name, action_type, action_data
+        )
+        if result:
+            return jsonify({"status": "success"})
+        return jsonify({"error": "Failed to track analytics"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/analytics/<address>', methods=['GET'])
+def get_analytics(address):
+    try:
+        analytics = supabase_client.get_user_analytics(address)
+        return jsonify({"address": address, "analytics": analytics, "count": len(analytics)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
+# USER STATS ROUTE
+# ============================================
+
+@app.route('/api/user/stats/<address>', methods=['GET'])
+def get_user_stats(address):
+    try:
+        stats = supabase_client.get_user_stats(address)
+        if stats:
+            return jsonify(stats)
+        return jsonify({"error": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
+# MINING SESSIONS ROUTE
+# ============================================
+
+@app.route('/api/mining/sessions/<address>', methods=['GET'])
+def get_mining_sessions(address):
+    try:
+        sessions = supabase_client.get_mining_sessions(address)
+        return jsonify({"address": address, "sessions": sessions, "count": len(sessions)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
 # RUN APP
 # ============================================
 if __name__ == '__main__':
