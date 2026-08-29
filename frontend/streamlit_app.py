@@ -28,7 +28,6 @@ st.set_page_config(
 # ============================================
 st.markdown("""
     <style>
-    /* Main header */
     .main-header {
         background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #2d2d44 100%);
         padding: 20px 30px;
@@ -36,8 +35,6 @@ st.markdown("""
         margin-bottom: 25px;
         border: 1px solid #2d2d44;
     }
-    
-    /* Admin badge */
     .admin-badge {
         background: #f5576c;
         color: white;
@@ -48,8 +45,6 @@ st.markdown("""
         letter-spacing: 1px;
         display: inline-block;
     }
-    
-    /* Status cards */
     .stat-card {
         background: #1a1a2e;
         padding: 18px 20px;
@@ -57,34 +52,27 @@ st.markdown("""
         border: 1px solid #2d2d44;
         margin-bottom: 10px;
     }
-    
     .stat-card:hover {
         border-color: #667eea;
         transition: 0.3s;
     }
-    
     .stat-number {
         font-size: 28px;
         font-weight: bold;
         color: #ffffff;
     }
-    
     .stat-label {
         font-size: 13px;
         color: #8899aa;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    
-    /* Tables */
     .data-table {
         background: #1a1a2e;
         padding: 15px;
         border-radius: 12px;
         border: 1px solid #2d2d44;
     }
-    
-    /* Admin actions */
     .admin-action {
         background: #1a1a2e;
         padding: 15px;
@@ -92,24 +80,14 @@ st.markdown("""
         border-left: 4px solid #667eea;
         margin-bottom: 10px;
     }
-    
-    /* Status indicators */
     .status-online {
         color: #00d2ff;
         font-weight: bold;
     }
-    
     .status-offline {
         color: #f5576c;
         font-weight: bold;
     }
-    
-    .status-warning {
-        color: #f093fb;
-        font-weight: bold;
-    }
-    
-    /* Footer */
     .footer {
         text-align: center;
         padding: 20px;
@@ -122,18 +100,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
-# AUTHENTICATION (Hardcoded Admin)
+# AUTHENTICATION
 # ============================================
 ADMIN_CREDENTIALS = {
     "admin": "admin123",
     "merlito": "merlito456"
 }
 
+# Initialize session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'username' not in st.session_state:
+    st.session_state.username = None
+
 def check_auth():
     """Check if user is authenticated"""
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = False
-    
     if not st.session_state.authenticated:
         st.markdown("""
         <div style="max-width: 400px; margin: 100px auto; padding: 40px; background: #1a1a2e; border-radius: 15px; border: 1px solid #2d2d44;">
@@ -150,6 +131,7 @@ def check_auth():
             if st.button("🔓 Login", use_container_width=True, type="primary"):
                 if username in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[username] == password:
                     st.session_state.authenticated = True
+                    st.session_state.username = username
                     st.success("✅ Login successful!")
                     time.sleep(0.5)
                     st.rerun()
@@ -203,9 +185,6 @@ st.markdown(f"""
             <div style="color: #8899aa; font-size: 12px;">
                 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             </div>
-            <button onclick="location.reload()" style="background: #2d2d44; border: none; color: #8899aa; padding: 5px 15px; border-radius: 5px; cursor: pointer; margin-top: 5px;">
-                🔄 Refresh
-            </button>
         </div>
     </div>
 </div>
@@ -280,7 +259,7 @@ with col1:
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.warning("⚠️ Stats unavailable")
+        st.warning("⚠️ Stats unavailable - Backend offline")
     
     st.markdown("---")
     
@@ -308,7 +287,7 @@ with col1:
         else:
             st.caption("No wallets found")
     else:
-        st.caption("No data")
+        st.caption("No data - Backend offline")
 
 # ============================================
 # COLUMN 2 - BLOCKCHAIN EXPLORER
@@ -334,8 +313,7 @@ with col2:
         st.markdown("### 📦 Latest Blocks")
         
         if chain:
-            # Show last 10 blocks
-            latest_blocks = chain[-10:][::-1]  # Reverse to show newest first
+            latest_blocks = chain[-10:][::-1]
             
             blocks_data = []
             for block in latest_blocks:
@@ -347,21 +325,22 @@ with col2:
                     "Time": datetime.fromtimestamp(block.get('timestamp', 0)).strftime('%H:%M:%S') if block.get('timestamp') else "N/A"
                 })
             
-            df = pd.DataFrame(blocks_data)
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Block": "Block",
-                    "Hash": "Hash",
-                    "Txs": "Txs",
-                    "Nonce": "Nonce",
-                    "Time": "Time"
-                }
-            )
+            if blocks_data:
+                df = pd.DataFrame(blocks_data)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Block": "Block",
+                        "Hash": "Hash",
+                        "Txs": "Txs",
+                        "Nonce": "Nonce",
+                        "Time": "Time"
+                    }
+                )
         else:
-            st.info("No blocks yet")
+            st.info("No blocks yet - Initialize blockchain")
         
         # ============================================
         # PENDING TRANSACTIONS
@@ -383,6 +362,7 @@ with col2:
     
     else:
         st.warning("⚠️ Blockchain data unavailable")
+        st.info("💡 Initialize blockchain by clicking 'Initialize Blockchain' in admin actions")
 
 # ============================================
 # COLUMN 3 - ADMIN ACTIONS & TOKEN INFO
@@ -391,7 +371,27 @@ with col3:
     st.subheader("⚙️ Admin Actions")
     
     # ============================================
-    # ADMIN ACTIONS
+    # INITIALIZE BLOCKCHAIN
+    # ============================================
+    st.markdown("""
+    <div class="admin-action">
+        <strong>🚀 Initialize Blockchain</strong>
+        <p style="color: #8899aa; font-size: 12px;">Create genesis block and start the chain</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚀 Initialize Blockchain", use_container_width=True, type="primary"):
+        with st.spinner("Initializing blockchain..."):
+            # This would call a backend endpoint to initialize
+            # For now, we'll show a message
+            st.info("💡 Please ensure your backend is running and Supabase is connected")
+            time.sleep(2)
+            refresh_data()
+    
+    st.markdown("---")
+    
+    # ============================================
+    # FORCE MINE
     # ============================================
     st.markdown("""
     <div class="admin-action">
@@ -408,7 +408,7 @@ with col3:
                 time.sleep(1)
                 refresh_data()
             else:
-                st.error(f"❌ {error}")
+                st.error(f"❌ {error or 'Backend offline'}")
     
     st.markdown("---")
     
@@ -438,6 +438,8 @@ with col3:
             </div>
         </div>
         """, unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ Token info unavailable - Backend offline")
     
     st.markdown("---")
     
@@ -465,10 +467,14 @@ with col3:
     # USER SESSION
     # ============================================
     st.subheader("👤 Admin Session")
-    st.caption(f"Logged in as: **{username}**")
+    if st.session_state.username:
+        st.caption(f"Logged in as: **{st.session_state.username}**")
+    else:
+        st.caption("Logged in as: **admin**")
     
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
+        st.session_state.username = None
         st.rerun()
 
 # ============================================
@@ -482,11 +488,3 @@ st.markdown(f"""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
-# ============================================
-# AUTO-REFRESH (Every 15 seconds)
-# ============================================
-if st.button("🔄 Auto-Refresh (15s)", use_container_width=True):
-    st.cache_data.clear()
-    time.sleep(15)
-    st.rerun()
