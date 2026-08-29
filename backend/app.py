@@ -9,6 +9,10 @@ from auth import (
     get_user_wallet, auth_check, verify_session,
     generate_jwt
 )
+from referral import (
+    create_referral_code, process_referral, 
+    get_referral_stats, get_referral_tree
+)
 import time
 import os
 import uuid
@@ -586,6 +590,69 @@ def refresh_token():
     return jsonify({'token': token}), 200
 
 # ============================================
+# REFERRAL ROUTES
+# ============================================
+
+@app.route('/api/referral/code', methods=['POST'])
+def generate_referral_code():
+    """Generate a referral code for a wallet"""
+    try:
+        data = request.json
+        address = data.get('address')
+        
+        if not address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        result, status = create_referral_code(address)
+        return jsonify(result), status
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referral/process', methods=['POST'])
+def process_referral_route():
+    """Process a new referral"""
+    try:
+        data = request.json
+        referrer_code = data.get('referrer_code')
+        new_address = data.get('new_address')
+        
+        if not referrer_code or not new_address:
+            return jsonify({"error": "Referrer code and new address required"}), 400
+        
+        result, status = process_referral(referrer_code, new_address)
+        return jsonify(result), status
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referral/stats/<address>', methods=['GET'])
+def get_referral_stats_route(address):
+    """Get referral statistics for a wallet"""
+    try:
+        stats = get_referral_stats(address)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referral/tree/<address>', methods=['GET'])
+def get_referral_tree_route(address):
+    """Get referral tree for a wallet"""
+    try:
+        depth = request.args.get('depth', 3, type=int)
+        tree = get_referral_tree(address, depth)
+        return jsonify({"address": address, "tree": tree})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/referral/rewards/<address>', methods=['GET'])
+def get_referral_rewards(address):
+    """Get referral rewards for a wallet"""
+    try:
+        rewards = supabase_client.get_referral_rewards(address)
+        return jsonify({"address": address, "rewards": rewards, "count": len(rewards)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
 # ANDROID APP SPECIFIC ENDPOINTS
 # ============================================
 
@@ -765,52 +832,6 @@ def get_user_analytics(address):
             "recent_activity": activity_resp.data,
             "token": TOKEN_SYMBOL
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# --------------------------------
-# REFERRAL ROUTES
-# --------------------------------
-
-@app.route('/api/referral/create', methods=['POST'])
-def create_referral():
-    try:
-        data = request.json
-        referrer = data.get('referrer')
-        referred = data.get('referred')
-        
-        if not referrer or not referred:
-            return jsonify({"error": "Referrer and referred addresses required"}), 400
-        
-        result = supabase_client.create_referral(referrer, referred)
-        if result:
-            return jsonify({"status": "success", "referral": result})
-        return jsonify({"error": "Failed to create referral"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/referral/complete', methods=['POST'])
-def complete_referral():
-    try:
-        data = request.json
-        referral_id = data.get('referral_id')
-        reward = data.get('reward', 5.0)
-        
-        if not referral_id:
-            return jsonify({"error": "Referral ID required"}), 400
-        
-        result = supabase_client.complete_referral(referral_id, reward)
-        if result:
-            return jsonify({"status": "success", "referral": result})
-        return jsonify({"error": "Failed to complete referral"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/referrals/<address>', methods=['GET'])
-def get_referrals(address):
-    try:
-        referrals = supabase_client.get_referrals(address)
-        return jsonify({"address": address, "referrals": referrals, "count": len(referrals)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
