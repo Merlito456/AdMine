@@ -245,10 +245,11 @@ st.markdown("---")
 # ============================================
 # ADMIN DASHBOARD - TABS
 # ============================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Dashboard",
     "⛏️ Mining",
     "🪙 Token Supply",
+    "📱 App Analytics",
     "⚙️ Configurations",
     "📝 Transactions",
     "👛 Wallets"
@@ -408,7 +409,6 @@ with tab2:
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        # Mining rate display
         if mining_rate:
             st.info(f"""
             **Current Mining Rate:** {mining_rate.get('hourly_rate', 0.5)} {TOKEN_SYMBOL}/hour  
@@ -416,7 +416,6 @@ with tab2:
             **Claim Interval:** {mining_rate.get('claim_interval_hours', 24)} hours
             """)
         
-        # Wallet address input
         mining_address = st.text_input("Wallet Address for Mining", placeholder="Enter wallet address...")
         
         if not mining_address and st.session_state.mining_address:
@@ -479,7 +478,6 @@ with tab2:
         
         st.markdown("---")
         
-        # Mining Stats
         if mining_address:
             st.subheader("📊 Mining Statistics")
             stats_data, _ = api_request(f'/api/mining/stats/{mining_address}')
@@ -667,9 +665,80 @@ with tab3:
                         st.error(f"❌ {error}")
 
 # ============================================
-# TAB 4: CONFIGURATIONS
+# TAB 4: APP ANALYTICS
 # ============================================
 with tab4:
+    st.subheader("📱 App User Analytics")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Get ad stats
+    ad_stats, _ = api_request('/api/ad/stats')
+    if ad_stats:
+        with col1:
+            st.metric("Total Ad Views", ad_stats.get('total_ad_views', 0))
+            st.metric("Total Ad Rewards", f"{ad_stats.get('total_ad_rewards', 0):.2f} {TOKEN_SYMBOL}")
+        
+        # Ad type breakdown (simplified)
+        with col2:
+            st.subheader("📊 Ad Statistics")
+            st.caption(f"Total views: {ad_stats.get('total_ad_views', 0)}")
+            st.caption(f"Total rewards: {ad_stats.get('total_ad_rewards', 0):.2f} {TOKEN_SYMBOL}")
+    
+    # User stats lookup
+    st.markdown("---")
+    st.subheader("🔍 Lookup User Stats")
+    user_address = st.text_input("Enter Wallet Address", placeholder="0x...")
+    
+    if user_address and st.button("📊 Get User Stats", use_container_width=True):
+        with st.spinner("Loading user data..."):
+            data, error = api_request(f'/api/user/dashboard/{user_address}')
+            if data and not error:
+                st.success(f"✅ User found: {user_address[:15]}...")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("💰 Balance", f"{data.get('balance', 0):.4f} {TOKEN_SYMBOL}")
+                    st.metric("📺 Ads Watched", data.get('stats', {}).get('total_ads_watched', 0))
+                with col2:
+                    st.metric("⛏️ Mining Sessions", data.get('stats', {}).get('total_mining_sessions', 0))
+                    st.metric("📊 Total Ad Rewards", f"{data.get('stats', {}).get('total_ad_rewards', 0):.4f} {TOKEN_SYMBOL}")
+                with col3:
+                    mining_active = data.get('stats', {}).get('mining_active', False)
+                    st.metric("🔄 Mining Active", "✅ Yes" if mining_active else "❌ No")
+                    st.metric("📅 Last Active", data.get('stats', {}).get('last_active', 'Never')[:16] if data.get('stats', {}).get('last_active') else 'Never')
+                
+                # Recent activity
+                st.subheader("📝 Recent Activity")
+                recent_ads = data.get('recent_ads', [])
+                recent_mining = data.get('recent_mining', [])
+                
+                if recent_ads or recent_mining:
+                    activity_data = []
+                    for ad in recent_ads[:5]:
+                        activity_data.append({
+                            "Type": "📺 Ad View",
+                            "Amount": f"{ad.get('reward_amount', 0):.4f} {TOKEN_SYMBOL}",
+                            "Time": ad.get('timestamp', '')[:19] if ad.get('timestamp') else ''
+                        })
+                    for mining in recent_mining[:5]:
+                        activity_data.append({
+                            "Type": "⛏️ Mining",
+                            "Amount": f"{mining.get('reward_earned', 0):.4f} {TOKEN_SYMBOL}",
+                            "Time": mining.get('start_time', '')[:19] if mining.get('start_time') else ''
+                        })
+                    if activity_data:
+                        df = pd.DataFrame(activity_data)
+                        st.dataframe(df, use_container_width=True)
+                else:
+                    st.info("No recent activity found")
+            else:
+                st.error(f"❌ {error or 'User not found'}")
+
+# ============================================
+# TAB 5: CONFIGURATIONS
+# ============================================
+with tab5:
     st.subheader("⚙️ Advanced Configurations")
     
     col1, col2 = st.columns(2)
@@ -732,9 +801,9 @@ with tab4:
                     st.error(f"❌ {error}")
 
 # ============================================
-# TAB 5: TRANSACTIONS
+# TAB 6: TRANSACTIONS
 # ============================================
-with tab5:
+with tab6:
     st.subheader("📝 Transaction Management")
     
     col1, col2 = st.columns(2)
@@ -791,9 +860,9 @@ with tab5:
                     st.error(f"❌ {error}")
 
 # ============================================
-# TAB 6: WALLETS
+# TAB 7: WALLETS
 # ============================================
-with tab6:
+with tab7:
     st.subheader("👛 Wallet Management")
     
     col1, col2 = st.columns(2)
