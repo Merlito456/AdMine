@@ -294,13 +294,31 @@ class SupabaseClient:
             return {'total_ad_views': 0, 'total_ad_rewards': 0}
 
     # ============================================
-    # MINING SESSION OPERATIONS
+    # MINING SESSION OPERATIONS - COMPLETE
     # ============================================
 
     def create_mining_session(self, session_data):
         """Create a new mining session"""
         try:
+            # Ensure required fields
+            required = ['wallet_address', 'start_time', 'status']
+            for field in required:
+                if field not in session_data:
+                    session_data[field] = 'active' if field == 'status' else None
+            
+            # Set defaults if not provided
+            if 'reward_amount' not in session_data:
+                session_data['reward_amount'] = 0
+            if 'reward_earned' not in session_data:
+                session_data['reward_earned'] = 0
+            if 'duration_seconds' not in session_data:
+                session_data['duration_seconds'] = 0
+            if 'hourly_rate' not in session_data:
+                session_data['hourly_rate'] = 0.5
+            
             result = self.client.table('mining_sessions').insert(session_data).execute()
+            if result.data:
+                print(f"✅ Mining session created: {result.data[0]['id']}")
             return result.data[0] if result.data else None
         except Exception as e:
             print(f"❌ Error creating mining session: {e}")
@@ -316,6 +334,8 @@ class SupabaseClient:
                 .order('start_time', desc=True)\
                 .limit(1)\
                 .execute()
+            if result.data:
+                print(f"✅ Found active session for {address}: {result.data[0]['id']}")
             return result.data[0] if result.data else None
         except Exception as e:
             print(f"❌ Error getting active mining session: {e}")
@@ -327,14 +347,16 @@ class SupabaseClient:
             data = {
                 'end_time': end_time,
                 'status': status,
-                'reward_earned': reward_earned,
-                'reward_amount': reward_earned,
+                'reward_earned': float(reward_earned),
+                'reward_amount': float(reward_earned),
                 'duration_seconds': duration_seconds
             }
             result = self.client.table('mining_sessions')\
                 .update(data)\
                 .eq('id', session_id)\
                 .execute()
+            if result.data:
+                print(f"✅ Mining session updated: {result.data[0]['id']}")
             return result.data[0] if result.data else None
         except Exception as e:
             print(f"❌ Error updating mining session: {e}")
@@ -362,7 +384,7 @@ class SupabaseClient:
                 return None
             
             sessions = self.get_mining_sessions(address)
-            total_mined = sum([s.get('reward_earned', 0) for s in sessions]) if sessions else 0
+            total_earned = sum([s.get('reward_earned', 0) for s in sessions]) if sessions else 0
             
             return {
                 'address': address,
@@ -370,7 +392,9 @@ class SupabaseClient:
                 'balance': wallet.get('balance', 0),
                 'mining_active': wallet.get('mining_active', False),
                 'total_sessions': len(sessions),
-                'total_earned': total_mined
+                'total_earned': total_earned,
+                'hourly_rate': wallet.get('hourly_rate', 0.5) if wallet else 0.5,
+                'daily_cap': 12.0
             }
         except Exception as e:
             print(f"❌ Error getting mining stats: {e}")
@@ -551,3 +575,4 @@ class SupabaseClient:
 
 # Initialize client
 supabase_client = SupabaseClient()
+print("✅ Supabase client ready")
