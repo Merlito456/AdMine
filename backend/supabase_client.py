@@ -401,51 +401,89 @@ class SupabaseClient:
             return None
 
     # ============================================
-    # REFERRAL OPERATIONS
+    # REFERRAL OPERATIONS - COMPLETE
     # ============================================
 
-    def create_referral(self, referrer_address, referred_address):
-        """Create a referral record"""
+    def get_wallet_by_referral_code(self, code):
+        """Get wallet by referral code"""
         try:
-            data = {
-                'referrer_address': referrer_address,
-                'referred_address': referred_address,
-                'status': 'pending'
-            }
-            result = self.client.table('referrals').insert(data).execute()
+            result = self.client.table('wallets')\
+                .select('*')\
+                .eq('referral_code', code)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error getting wallet by referral code: {e}")
+            return None
+
+    def get_referral_by_referred(self, address):
+        """Get referral by referred address"""
+        try:
+            result = self.client.table('referrals')\
+                .select('*')\
+                .eq('referred_address', address)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error getting referral by referred: {e}")
+            return None
+
+    def create_referral(self, referral_data):
+        """Create a new referral"""
+        try:
+            result = self.client.table('referrals').insert(referral_data).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             print(f"❌ Error creating referral: {e}")
             return None
 
-    def complete_referral(self, referral_id, reward_amount):
-        """Complete a referral"""
+    def create_referral_reward(self, reward_data):
+        """Create a referral reward record"""
         try:
-            data = {
-                'status': 'completed',
-                'reward_earned': float(reward_amount),
-                'completed_at': datetime.now(timezone.utc).isoformat()
-            }
-            result = self.client.table('referrals')\
-                .update(data)\
-                .eq('id', referral_id)\
+            result = self.client.table('referral_rewards').insert(reward_data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error creating referral reward: {e}")
+            return None
+
+    def get_referral_stats(self, address):
+        """Get referral statistics"""
+        try:
+            result = self.client.table('referral_stats')\
+                .select('*')\
+                .eq('referrer_address', address)\
                 .execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            print(f"❌ Error completing referral: {e}")
+            print(f"❌ Error getting referral stats: {e}")
             return None
 
-    def get_referrals(self, address):
-        """Get referrals for a wallet"""
+    def get_referrals_by_referrer(self, address, limit=50):
+        """Get referrals by referrer"""
         try:
             result = self.client.table('referrals')\
                 .select('*')\
                 .eq('referrer_address', address)\
                 .order('created_at', desc=True)\
+                .limit(limit)\
                 .execute()
             return result.data
         except Exception as e:
-            print(f"❌ Error getting referrals: {e}")
+            print(f"❌ Error getting referrals by referrer: {e}")
+            return []
+
+    def get_referral_rewards(self, address, limit=50):
+        """Get referral rewards for a wallet"""
+        try:
+            result = self.client.table('referral_rewards')\
+                .select('*')\
+                .eq('referrer_address', address)\
+                .order('timestamp', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting referral rewards: {e}")
             return []
 
     # ============================================
