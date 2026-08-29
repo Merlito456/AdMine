@@ -12,6 +12,45 @@ import json
 API_URL = os.getenv('API_URL', 'https://admine-kgvk.onrender.com')
 TOKEN_SYMBOL = "ADT"
 APP_NAME = "AdMine Admin"
+TOTAL_SUPPLY = 10_000_000_000_000  # 10 Trillion
+MAX_SUPPLY = 10_000_000_000_000   # 10 Trillion
+
+# ============================================
+# FORMATTING HELPERS
+# ============================================
+def format_supply(value):
+    """Format supply in a readable way"""
+    if value is None:
+        return "0"
+    try:
+        value = float(value)
+        if value >= 1_000_000_000_000:
+            return f"{value/1_000_000_000_000:.2f} Trillion"
+        elif value >= 1_000_000_000:
+            return f"{value/1_000_000_000:.2f} Billion"
+        elif value >= 1_000_000:
+            return f"{value/1_000_000:.2f} Million"
+        elif value >= 1_000:
+            return f"{value:,.0f}"
+        else:
+            return f"{value:.4f}"
+    except:
+        return str(value)
+
+def format_balance(value):
+    """Format balance with appropriate decimals"""
+    if value is None:
+        return "0.0000"
+    try:
+        value = float(value)
+        if value >= 1000:
+            return f"{value:,.2f}"
+        elif value >= 1:
+            return f"{value:.4f}"
+        else:
+            return f"{value:.6f}"
+    except:
+        return str(value)
 
 # ============================================
 # PAGE CONFIG
@@ -96,6 +135,10 @@ st.markdown("""
         padding: 10px 15px;
         border-radius: 10px;
         border: 1px solid #2d2d44;
+    }
+    .trillion-text {
+        color: #f093fb;
+        font-weight: bold;
     }
     .footer {
         text-align: center;
@@ -186,6 +229,7 @@ st.markdown(f"""
             <div style="display: flex; gap: 10px; margin-top: 5px;">
                 <span class="admin-badge">ADMIN</span>
                 <span style="color: #8899aa; font-size: 13px;">{TOKEN_SYMBOL} Blockchain Monitor</span>
+                <span style="color: #f093fb; font-size: 13px;">🔹 10 Trillion Supply</span>
             </div>
         </div>
         <div style="text-align: right;">
@@ -225,7 +269,7 @@ with col_status2:
 with col_status3:
     if backend_data:
         supply = backend_data.get('total_supply', 0)
-        st.info(f"🪙 Supply: {supply:,} {TOKEN_SYMBOL}")
+        st.info(f"🪙 Supply: {format_supply(supply)}")
     else:
         st.warning("⚠️ Unknown")
 
@@ -281,7 +325,11 @@ with tab1:
             </div>
             <div class="stat-card">
                 <div class="stat-label">🪙 Total Supply</div>
-                <div class="stat-number">{stats_data.get('total_supply', 0):.4f}</div>
+                <div class="stat-number">{format_supply(stats_data.get('total_supply', 0))}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">📊 Max Supply</div>
+                <div class="stat-number" style="color: #f093fb;">{format_supply(MAX_SUPPLY)}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">⏱️ Mining Rate</div>
@@ -305,7 +353,7 @@ with tab1:
                     <div style="background: #1a1a2e; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; border: 1px solid #2d2d44;">
                         <span style="font-size: 14px;">
                             {medal} {addr} 
-                            <span style="float: right; color: #00d2ff;">{balance:.4f} {TOKEN_SYMBOL}</span>
+                            <span style="float: right; color: #00d2ff;">{format_balance(balance)} {TOKEN_SYMBOL}</span>
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
@@ -326,6 +374,9 @@ with tab1:
             if mining_rate:
                 st.metric("⛏️ Hourly Rate", f"{mining_rate.get('hourly_rate', 0.5)} {TOKEN_SYMBOL}/hr")
                 st.metric("📊 Daily Cap", f"{mining_rate.get('daily_cap', 12)} {TOKEN_SYMBOL}/day")
+            
+            st.metric("🪙 Total Supply", format_supply(backend_data.get('total_supply', 0)) if backend_data else "N/A")
+            st.metric("📊 Max Supply", format_supply(MAX_SUPPLY))
             
             st.markdown("### 📦 Latest Blocks")
             if chain:
@@ -369,11 +420,15 @@ with tab1:
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                     <span style="color: #8899aa;">Total Supply</span>
-                    <span style="color: #f093fb;">{backend_data.get('total_supply', 0):,}</span>
+                    <span style="color: #f093fb;">{format_supply(backend_data.get('total_supply', 0))}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
+                    <span style="color: #8899aa;">Max Supply</span>
+                    <span style="color: #f5576c;">{format_supply(backend_data.get('max_supply', MAX_SUPPLY))}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 5px 0;">
-                    <span style="color: #8899aa;">Max Supply</span>
-                    <span style="color: #f5576c;">{backend_data.get('max_supply', 100000000):,}</span>
+                    <span style="color: #8899aa;">Genesis Supply</span>
+                    <span style="color: #4ecca3;">{format_supply(backend_data.get('genesis_supply', 0))}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -486,11 +541,11 @@ with tab2:
                 <div style="background: #1a1a2e; padding: 15px; border-radius: 12px; border: 1px solid #2d2d44;">
                     <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                         <span style="color: #8899aa;">Total Mined</span>
-                        <span style="color: #00d2ff;">{stats_data.get('total_mined', 0):.6f} {TOKEN_SYMBOL}</span>
+                        <span style="color: #00d2ff;">{format_balance(stats_data.get('total_mined', 0))} {TOKEN_SYMBOL}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                         <span style="color: #8899aa;">Current Balance</span>
-                        <span style="color: #f093fb;">{stats_data.get('balance', 0):.6f} {TOKEN_SYMBOL}</span>
+                        <span style="color: #f093fb;">{format_balance(stats_data.get('balance', 0))} {TOKEN_SYMBOL}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; padding: 5px 0;">
                         <span style="color: #8899aa;">Status</span>
@@ -637,11 +692,11 @@ with tab3:
         
         stats_data, _ = api_request('/api/stats')
         if stats_data:
-            st.metric("Total Supply", f"{stats_data.get('total_supply', 0):.4f} {TOKEN_SYMBOL}")
-            st.metric("Circulating Supply", f"{stats_data.get('circulating_supply', 0):.4f} {TOKEN_SYMBOL}")
+            st.metric("Total Supply", f"{format_supply(stats_data.get('total_supply', 0))}")
+            st.metric("Circulating Supply", f"{format_supply(stats_data.get('circulating_supply', 0))}")
             st.metric("Total Wallets", stats_data.get('total_wallets', 0))
             st.metric("Total Transactions", stats_data.get('total_transactions', 0))
-            st.metric("Max Supply", f"{stats_data.get('max_supply', 100000000):,} {TOKEN_SYMBOL}")
+            st.metric("Max Supply", f"{format_supply(stats_data.get('max_supply', MAX_SUPPLY))}")
             st.metric("Mining Rate", f"{stats_data.get('hourly_mining_rate', 0.5)} {TOKEN_SYMBOL}/hr")
         
         st.markdown("---")
@@ -677,12 +732,12 @@ with tab4:
     if ad_stats:
         with col1:
             st.metric("Total Ad Views", ad_stats.get('total_ad_views', 0))
-            st.metric("Total Ad Rewards", f"{ad_stats.get('total_ad_rewards', 0):.2f} {TOKEN_SYMBOL}")
+            st.metric("Total Ad Rewards", f"{format_balance(ad_stats.get('total_ad_rewards', 0))} {TOKEN_SYMBOL}")
         
         with col2:
             st.subheader("📊 Ad Statistics")
             st.caption(f"Total views: {ad_stats.get('total_ad_views', 0)}")
-            st.caption(f"Total rewards: {ad_stats.get('total_ad_rewards', 0):.2f} {TOKEN_SYMBOL}")
+            st.caption(f"Total rewards: {format_balance(ad_stats.get('total_ad_rewards', 0))} {TOKEN_SYMBOL}")
     
     # User stats lookup
     st.markdown("---")
@@ -697,11 +752,11 @@ with tab4:
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("💰 Balance", f"{data.get('balance', 0):.4f} {TOKEN_SYMBOL}")
+                    st.metric("💰 Balance", f"{format_balance(data.get('balance', 0))} {TOKEN_SYMBOL}")
                     st.metric("📺 Ads Watched", data.get('stats', {}).get('total_ads_watched', 0))
                 with col2:
                     st.metric("⛏️ Mining Sessions", data.get('stats', {}).get('total_mining_sessions', 0))
-                    st.metric("📊 Total Ad Rewards", f"{data.get('stats', {}).get('total_ad_rewards', 0):.4f} {TOKEN_SYMBOL}")
+                    st.metric("📊 Total Ad Rewards", f"{format_balance(data.get('stats', {}).get('total_ad_rewards', 0))} {TOKEN_SYMBOL}")
                 with col3:
                     mining_active = data.get('stats', {}).get('mining_active', False)
                     st.metric("🔄 Mining Active", "✅ Yes" if mining_active else "❌ No")
@@ -717,13 +772,13 @@ with tab4:
                     for ad in recent_ads[:5]:
                         activity_data.append({
                             "Type": "📺 Ad View",
-                            "Amount": f"{ad.get('reward_amount', 0):.4f} {TOKEN_SYMBOL}",
+                            "Amount": f"{format_balance(ad.get('reward_amount', 0))} {TOKEN_SYMBOL}",
                             "Time": ad.get('timestamp', '')[:19] if ad.get('timestamp') else ''
                         })
                     for mining in recent_mining[:5]:
                         activity_data.append({
                             "Type": "⛏️ Mining",
-                            "Amount": f"{mining.get('reward_earned', 0):.4f} {TOKEN_SYMBOL}",
+                            "Amount": f"{format_balance(mining.get('reward_earned', 0))} {TOKEN_SYMBOL}",
                             "Time": mining.get('start_time', '')[:19] if mining.get('start_time') else ''
                         })
                     if activity_data:
@@ -905,12 +960,12 @@ with tab7:
                     st.success("✅ Wallet found!")
                     st.info(f"""
                     **Address:** `{lookup_address}`  
-                    **Balance:** {balance_data.get('balance', 0):.6f} {TOKEN_SYMBOL}
+                    **Balance:** {format_balance(balance_data.get('balance', 0))} {TOKEN_SYMBOL}
                     """)
                     
                     if stats_data and not stats_data.get('error'):
                         st.info(f"""
-                        **Total Mined:** {stats_data.get('total_mined', 0):.6f} {TOKEN_SYMBOL}  
+                        **Total Mined:** {format_balance(stats_data.get('total_mined', 0))} {TOKEN_SYMBOL}  
                         **Mining Active:** {'🟢 Yes' if stats_data.get('mining_active') else '🔴 No'}
                         """)
                 else:
