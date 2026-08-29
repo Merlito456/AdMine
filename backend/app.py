@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from blockchain_with_supabase import blockchain, TOKEN_SYMBOL
+from blockchain_with_supabase import blockchain, TOKEN_SYMBOL, TOKEN_NAME
 import time
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 
 # ============================================
 # CREATE APP
@@ -247,15 +248,13 @@ def process_ad_reward():
         transaction = {
             "from": "ad_system",
             "to": wallet_address,
-            "amount": 0.5,  # Fixed ad reward
+            "amount": 0.5,
             "type": "ad_reward",
             "token": TOKEN_SYMBOL,
             "timestamp": time.time()
         }
         
         blockchain.add_transaction(transaction)
-        
-        # Auto-claim mining reward (optional)
         new_balance = blockchain.get_balance(wallet_address)
         
         return jsonify({
@@ -318,6 +317,39 @@ def update_difficulty():
         "message": f"Difficulty updated to {difficulty}"
     })
 
+@app.route('/api/config/token-name', methods=['POST'])
+def update_token_name():
+    data = request.json
+    name = data.get('name')
+    
+    if not name:
+        return jsonify({"error": "Token name required"}), 400
+    
+    # Update in blockchain config
+    blockchain.token_name = name
+    
+    return jsonify({
+        "status": "success",
+        "name": name,
+        "message": f"Token name updated to {name}"
+    })
+
+@app.route('/api/config/token-symbol', methods=['POST'])
+def update_token_symbol():
+    data = request.json
+    symbol = data.get('symbol')
+    
+    if not symbol or len(symbol) > 5:
+        return jsonify({"error": "Valid symbol (max 5 chars) required"}), 400
+    
+    blockchain.token_symbol = symbol.upper()
+    
+    return jsonify({
+        "status": "success",
+        "symbol": symbol.upper(),
+        "message": f"Token symbol updated to {symbol.upper()}"
+    })
+
 @app.route('/api/admin/mint', methods=['POST'])
 def mint_tokens():
     data = request.json
@@ -376,6 +408,422 @@ def burn_tokens():
         "burned": amount,
         "address": address,
         "new_balance": blockchain.get_balance(address)
+    })
+
+@app.route('/api/admin/send', methods=['POST'])
+def admin_send():
+    data = request.json
+    to_address = data.get('to')
+    amount = data.get('amount')
+    note = data.get('note', '')
+    
+    if not to_address or not amount:
+        return jsonify({"error": "Recipient and amount required"}), 400
+    
+    transaction = {
+        "from": "admin_wallet",
+        "to": to_address,
+        "amount": float(amount),
+        "type": "admin_send",
+        "note": note,
+        "token": TOKEN_SYMBOL,
+        "timestamp": time.time()
+    }
+    
+    blockchain.add_transaction(transaction)
+    blockchain.update_wallet_balance(to_address, float(amount))
+    
+    return jsonify({
+        "status": "success",
+        "sent": amount,
+        "to": to_address,
+        "new_balance": blockchain.get_balance(to_address)
+    })
+
+@app.route('/api/admin/export', methods=['GET'])
+def export_blockchain():
+    return jsonify({
+        "blockchain": blockchain.to_dict(),
+        "stats": blockchain.get_blockchain_stats(),
+        "wallets": blockchain.get_all_wallets(),
+        "exported_at": datetime.utcnow().isoformat()
+    })
+
+@app.route('/api/admin/reset', methods=['POST'])
+def reset_blockchain():
+    try:
+        blockchain.chain = []
+        blockchain.pending_transactions = []
+        blockchain.create_genesis_block()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Blockchain reset successfully",
+            "new_block_count": len(blockchain.chain)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
+# ANDROID APP SPECIFIC ENDPOINTS
+# ============================================
+
+# --------------------------------
+# AD REWARD TRACKING
+# --------------------------------
+
+@app.route('/api/ad/watch', methods=['POST'])
+def track_ad_watch():
+    """Track ad viewing and reward user"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        ad_type = data.get('ad_type', 'rewarded')
+        ad_unit_id = data.get('ad_unit_id', '')
+        watch_duration = data.get('duration', 0)
+        
+        if not wallet_address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        # Get reward amount based on ad type
+        reward_amounts = {
+            'rewarded': 0.5,
+            'rewarded_interstitial': 1.0,
+            'banner': 0.1,
+            'native': 0.2,
+            'app_open': 0.3
+        }
+        reward = reward_amounts.get(ad_type, 0.5)
+        
+        # Record ad watch
+        ad_record = {
+            'wallet_address': wallet_address,
+            'ad_type': ad_type,
+            'ad_unit_id': ad_unit_id,
+            'reward_amount': reward,
+            'reward_claimed': True,
+            'watch_duration': watch_duration,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        from blockchain_with_supabase import supabase
+        supabase.table('ad_watch_history').insert(ad_record).execute()
+        
+        # Update wallet stats
+        wallet = supabase.table('wallets').select('total_ads_watched, total_ad_rewards').eq('address', wallet_address).execute()
+        if wallet.data:
+            current_ads = wallet.data[0].get('total_ads_watched', 0)
+            current_rewards = wallet.data[0].get('total_ad_rewards', 0)
+            
+            supabase.table('wallets').update({
+                'total_ads_watched': current_ads + 1,
+                'total_ad_rewards': float(current_rewards) + reward,
+                'last_ad_watch': datetime.now(timezone.utc).isoformat()
+            }).eq('address', wallet_address).execute()
+        
+        # Create reward transaction
+        transaction = {
+            "from": "ad_system",
+            "to": wallet_address,
+            "amount": reward,
+            "type": "ad_reward",
+            "token": TOKEN_SYMBOL,
+            "timestamp": time.time()
+        }
+        blockchain.add_transaction(transaction)
+        blockchain.update_wallet_balance(wallet_address, reward)
+        
+        return jsonify({
+            "status": "success",
+            "reward": reward,
+            "token": TOKEN_SYMBOL,
+            "address": wallet_address,
+            "new_balance": blockchain.get_balance(wallet_address),
+            "message": f"Earned {reward} {TOKEN_SYMBOL} from ad!"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/ad/history/<address>', methods=['GET'])
+def get_ad_history(address):
+    """Get ad watching history for a user"""
+    try:
+        from blockchain_with_supabase import supabase
+        response = supabase.table('ad_watch_history')\
+            .select('*')\
+            .eq('wallet_address', address)\
+            .order('timestamp', desc=True)\
+            .limit(50)\
+            .execute()
+        
+        return jsonify({
+            "address": address,
+            "history": response.data,
+            "count": len(response.data)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/ad/stats', methods=['GET'])
+def get_ad_stats():
+    """Get global ad statistics"""
+    try:
+        from blockchain_with_supabase import supabase
+        
+        views_resp = supabase.table('ad_watch_history').select('*', count='exact').execute()
+        total_views = len(views_resp.data) if hasattr(views_resp, 'data') else 0
+        
+        rewards_resp = supabase.table('ad_watch_history')\
+            .select('reward_amount')\
+            .execute()
+        total_rewards = sum([r['reward_amount'] for r in rewards_resp.data]) if hasattr(rewards_resp, 'data') else 0
+        
+        return jsonify({
+            "total_ad_views": total_views,
+            "total_ad_rewards": total_rewards,
+            "token": TOKEN_SYMBOL
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --------------------------------
+# USER ANALYTICS
+# --------------------------------
+
+@app.route('/api/analytics/track', methods=['POST'])
+def track_analytics():
+    """Track user analytics from app"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        screen_name = data.get('screen', 'unknown')
+        action_type = data.get('action', 'view')
+        action_data = data.get('data', {})
+        
+        if not wallet_address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        from blockchain_with_supabase import supabase
+        record = {
+            'wallet_address': wallet_address,
+            'session_id': session_id,
+            'screen_name': screen_name,
+            'action_type': action_type,
+            'action_data': action_data,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        supabase.table('app_analytics').insert(record).execute()
+        
+        supabase.table('wallets').update({
+            'last_active': datetime.now(timezone.utc).isoformat()
+        }).eq('address', wallet_address).execute()
+        
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/analytics/user/<address>', methods=['GET'])
+def get_user_analytics(address):
+    """Get user analytics data"""
+    try:
+        from blockchain_with_supabase import supabase
+        
+        stats_resp = supabase.table('user_stats').select('*').eq('address', address).execute()
+        
+        activity_resp = supabase.table('app_analytics')\
+            .select('*')\
+            .eq('wallet_address', address)\
+            .order('timestamp', desc=True)\
+            .limit(20)\
+            .execute()
+        
+        return jsonify({
+            "address": address,
+            "stats": stats_resp.data[0] if stats_resp.data else {},
+            "recent_activity": activity_resp.data,
+            "token": TOKEN_SYMBOL
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --------------------------------
+# MINING SESSION MANAGEMENT
+# --------------------------------
+
+@app.route('/api/mining/session/start', methods=['POST'])
+def start_mining_session():
+    """Start a mining session and track it"""
+    try:
+        data = request.json
+        address = data.get('address')
+        
+        if not address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        from blockchain_with_supabase import supabase
+        
+        result = blockchain.start_mining(address)
+        if result.get('error'):
+            return jsonify(result), 400
+        
+        session = {
+            'wallet_address': address,
+            'start_time': datetime.now(timezone.utc).isoformat(),
+            'status': 'active',
+            'hourly_rate': blockchain.hourly_rate
+        }
+        supabase.table('mining_sessions').insert(session).execute()
+        
+        wallet = supabase.table('wallets').select('total_mining_sessions').eq('address', address).execute()
+        if wallet.data:
+            current = wallet.data[0].get('total_mining_sessions', 0)
+            supabase.table('wallets').update({
+                'total_mining_sessions': current + 1
+            }).eq('address', address).execute()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Mining session started",
+            "address": address,
+            "rate": blockchain.hourly_rate
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mining/session/stop', methods=['POST'])
+def stop_mining_session():
+    """Stop mining session and record rewards"""
+    try:
+        data = request.json
+        address = data.get('address')
+        
+        if not address:
+            return jsonify({"error": "Wallet address required"}), 400
+        
+        from blockchain_with_supabase import supabase
+        
+        result = blockchain.stop_mining(address)
+        if result.get('error'):
+            return jsonify(result), 400
+        
+        now = datetime.now(timezone.utc)
+        reward = result.get('reward', 0)
+        duration_str = result.get('duration', '0 hours')
+        try:
+            duration_hours = float(duration_str.split()[0])
+            duration_seconds = int(duration_hours * 3600)
+        except:
+            duration_seconds = 0
+        
+        supabase.table('mining_sessions')\
+            .update({
+                'end_time': now.isoformat(),
+                'status': 'completed',
+                'reward_earned': reward,
+                'duration_seconds': duration_seconds
+            })\
+            .eq('wallet_address', address)\
+            .eq('status', 'active')\
+            .execute()
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mining/sessions/<address>', methods=['GET'])
+def get_mining_sessions(address):
+    """Get mining session history"""
+    try:
+        from blockchain_with_supabase import supabase
+        response = supabase.table('mining_sessions')\
+            .select('*')\
+            .eq('wallet_address', address)\
+            .order('start_time', desc=True)\
+            .limit(50)\
+            .execute()
+        
+        return jsonify({
+            "address": address,
+            "sessions": response.data,
+            "count": len(response.data)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --------------------------------
+# USER DASHBOARD / STATS
+# --------------------------------
+
+@app.route('/api/user/dashboard/<address>', methods=['GET'])
+def get_user_dashboard(address):
+    """Get complete user dashboard data"""
+    try:
+        from blockchain_with_supabase import supabase
+        
+        wallet_resp = supabase.table('wallets').select('*').eq('address', address).execute()
+        wallet = wallet_resp.data[0] if wallet_resp.data else None
+        
+        if not wallet:
+            return jsonify({"error": "Wallet not found"}), 404
+        
+        ad_resp = supabase.table('ad_watch_history')\
+            .select('*')\
+            .eq('wallet_address', address)\
+            .order('timestamp', desc=True)\
+            .limit(10)\
+            .execute()
+        
+        mining_resp = supabase.table('mining_sessions')\
+            .select('*')\
+            .eq('wallet_address', address)\
+            .order('start_time', desc=True)\
+            .limit(10)\
+            .execute()
+        
+        mining_status = blockchain.get_mining_status(address)
+        
+        return jsonify({
+            "address": address,
+            "balance": wallet.get('balance', 0),
+            "token": TOKEN_SYMBOL,
+            "stats": {
+                "total_ads_watched": wallet.get('total_ads_watched', 0),
+                "total_ad_rewards": float(wallet.get('total_ad_rewards', 0)),
+                "total_mining_sessions": wallet.get('total_mining_sessions', 0),
+                "last_active": wallet.get('last_active'),
+                "mining_active": mining_status.get('status') == 'active' if not mining_status.get('error') else False
+            },
+            "recent_ads": ad_resp.data if hasattr(ad_resp, 'data') else [],
+            "recent_mining": mining_resp.data if hasattr(mining_resp, 'data') else [],
+            "mining_status": mining_status
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --------------------------------
+# APP CONFIGURATION
+# --------------------------------
+
+@app.route('/api/app/config', methods=['GET'])
+def get_app_config():
+    """Get app configuration for Android app"""
+    return jsonify({
+        "app_name": "AdMine",
+        "token_symbol": TOKEN_SYMBOL,
+        "token_name": TOKEN_NAME,
+        "mining_rate": blockchain.hourly_rate,
+        "daily_cap": blockchain.daily_cap,
+        "claim_interval": blockchain.claim_interval_hours,
+        "ad_rewards": {
+            "rewarded": 0.5,
+            "rewarded_interstitial": 1.0,
+            "banner": 0.1,
+            "native": 0.2,
+            "app_open": 0.3
+        },
+        "version": "1.0.0",
+        "api_version": "v1"
     })
 
 # ============================================
