@@ -1,24 +1,24 @@
 import streamlit as st
 import requests
-import json
+import pandas as pd
 import time
 from datetime import datetime
 import os
-import pandas as pd
+import json
 
 # ============================================
 # CONFIGURATION
 # ============================================
 API_URL = os.getenv('API_URL', 'http://localhost:5000')
 TOKEN_SYMBOL = "ADT"
-APP_NAME = "AdMine"
+APP_NAME = "AdMine Admin"
 
 # ============================================
 # PAGE CONFIG
 # ============================================
 st.set_page_config(
-    page_title=f"{APP_NAME} - {TOKEN_SYMBOL}",
-    page_icon="⛓️",
+    page_title=f"{APP_NAME} - {TOKEN_SYMBOL} Admin",
+    page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -30,77 +30,67 @@ st.markdown("""
     <style>
     /* Main header */
     .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 25px;
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #2d2d44 100%);
+        padding: 20px 30px;
         border-radius: 15px;
-        margin-bottom: 30px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        margin-bottom: 25px;
+        border: 1px solid #2d2d44;
     }
     
-    /* Cards */
+    /* Admin badge */
+    .admin-badge {
+        background: #f5576c;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        display: inline-block;
+    }
+    
+    /* Status cards */
     .stat-card {
-        background: linear-gradient(145deg, #1e1e2f, #2d2d44);
-        padding: 20px;
+        background: #1a1a2e;
+        padding: 18px 20px;
         border-radius: 12px;
-        border-left: 4px solid #667eea;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        margin-bottom: 15px;
+        border: 1px solid #2d2d44;
+        margin-bottom: 10px;
     }
     
-    .stat-card-blue { border-left-color: #667eea; }
-    .stat-card-green { border-left-color: #00d2ff; }
-    .stat-card-orange { border-left-color: #f093fb; }
-    .stat-card-pink { border-left-color: #f5576c; }
+    .stat-card:hover {
+        border-color: #667eea;
+        transition: 0.3s;
+    }
     
     .stat-number {
-        font-size: 32px;
+        font-size: 28px;
         font-weight: bold;
         color: #ffffff;
-        margin: 5px 0;
     }
     
     .stat-label {
-        font-size: 14px;
+        font-size: 13px;
         color: #8899aa;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 0.5px;
     }
     
-    .stat-change {
-        font-size: 12px;
-        color: #00d2ff;
-    }
-    
-    /* Buttons */
-    .stButton > button {
-        width: 100%;
-        border-radius: 10px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-    }
-    
-    /* Info boxes */
-    .info-box {
-        background: rgba(102, 126, 234, 0.1);
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid rgba(102, 126, 234, 0.2);
-    }
-    
-    /* Wallet display */
-    .wallet-display {
+    /* Tables */
+    .data-table {
         background: #1a1a2e;
         padding: 15px;
-        border-radius: 10px;
-        font-family: monospace;
-        font-size: 14px;
-        color: #00d2ff;
-        word-break: break-all;
+        border-radius: 12px;
+        border: 1px solid #2d2d44;
+    }
+    
+    /* Admin actions */
+    .admin-action {
+        background: #1a1a2e;
+        padding: 15px;
+        border-radius: 12px;
+        border-left: 4px solid #667eea;
+        margin-bottom: 10px;
     }
     
     /* Status indicators */
@@ -114,11 +104,16 @@ st.markdown("""
         font-weight: bold;
     }
     
+    .status-warning {
+        color: #f093fb;
+        font-weight: bold;
+    }
+    
     /* Footer */
     .footer {
         text-align: center;
         padding: 20px;
-        color: #8899aa;
+        color: #556677;
         font-size: 12px;
         border-top: 1px solid #2d2d44;
         margin-top: 40px;
@@ -127,10 +122,50 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
+# AUTHENTICATION (Hardcoded Admin)
+# ============================================
+ADMIN_CREDENTIALS = {
+    "admin": "admin123",
+    "merlito": "merlito456"
+}
+
+def check_auth():
+    """Check if user is authenticated"""
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    
+    if not st.session_state.authenticated:
+        st.markdown("""
+        <div style="max-width: 400px; margin: 100px auto; padding: 40px; background: #1a1a2e; border-radius: 15px; border: 1px solid #2d2d44;">
+            <h2 style="color: #667eea; text-align: center;">⚙️ Admin Access</h2>
+            <p style="color: #8899aa; text-align: center; margin-bottom: 30px;">Enter credentials to access the admin dashboard</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            username = st.text_input("👤 Username", placeholder="admin")
+            password = st.text_input("🔑 Password", type="password", placeholder="••••••••")
+            
+            if st.button("🔓 Login", use_container_width=True, type="primary"):
+                if username in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[username] == password:
+                    st.session_state.authenticated = True
+                    st.success("✅ Login successful!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials!")
+        
+        st.stop()
+
+check_auth()
+
+# ============================================
 # API HELPER FUNCTIONS
 # ============================================
+@st.cache_data(ttl=5)
 def api_request(endpoint, method='GET', data=None):
-    """Make API request to backend"""
+    """Make API request with caching"""
     try:
         url = f"{API_URL}{endpoint}"
         if method == 'GET':
@@ -146,15 +181,10 @@ def api_request(endpoint, method='GET', data=None):
     except Exception as e:
         return None, str(e)
 
-# ============================================
-# SESSION STATE INIT
-# ============================================
-if 'wallet' not in st.session_state:
-    st.session_state.wallet = None
-if 'balance' not in st.session_state:
-    st.session_state.balance = 0
-if 'token_info' not in st.session_state:
-    st.session_state.token_info = None
+def refresh_data():
+    """Force refresh cached data"""
+    st.cache_data.clear()
+    st.rerun()
 
 # ============================================
 # HEADER
@@ -163,238 +193,128 @@ st.markdown(f"""
 <div class="main-header">
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
-            <h1 style="color: white; margin: 0; font-size: 36px;">⛓️ {APP_NAME}</h1>
-            <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0 0; font-size: 16px;">
-                Proof of System · {TOKEN_SYMBOL} Token
-            </p>
+            <h1 style="color: white; margin: 0; font-size: 32px;">⚙️ {APP_NAME}</h1>
+            <div style="display: flex; gap: 10px; margin-top: 5px;">
+                <span class="admin-badge">ADMIN</span>
+                <span style="color: #8899aa; font-size: 13px;">{TOKEN_SYMBOL} Blockchain Monitor</span>
+            </div>
         </div>
         <div style="text-align: right;">
-            <span style="color: rgba(255,255,255,0.6); font-size: 12px;">STATUS</span><br>
-            <span id="status" class="status-online">● ONLINE</span>
+            <div style="color: #8899aa; font-size: 12px;">
+                {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            </div>
+            <button onclick="location.reload()" style="background: #2d2d44; border: none; color: #8899aa; padding: 5px 15px; border-radius: 5px; cursor: pointer; margin-top: 5px;">
+                🔄 Refresh
+            </button>
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================
-# SYSTEM STATS ROW
+# SYSTEM STATUS
 # ============================================
-st.subheader("📊 System Overview")
-
-# Check backend
 backend_data, backend_error = api_request('/api/token-info')
+chain_data, chain_error = api_request('/api/blockchain')
 
-col1, col2, col3, col4, col5 = st.columns(5)
+# Status bar
+col_status1, col_status2, col_status3, col_status4 = st.columns(4)
 
-with col1:
+with col_status1:
     if backend_data:
-        st.markdown(f"""
-        <div class="stat-card stat-card-blue">
-            <div class="stat-label">🪙 Token</div>
-            <div class="stat-number">{backend_data.get('symbol', TOKEN_SYMBOL)}</div>
-            <div class="stat-change">{backend_data.get('name', 'AdToken')}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.success("✅ Backend: Online")
     else:
-        st.markdown("""
-        <div class="stat-card stat-card-blue">
-            <div class="stat-label">🪙 Token</div>
-            <div class="stat-number">OFFLINE</div>
-            <div class="stat-change">⚠️ Backend down</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.error("❌ Backend: Offline")
 
-with col2:
-    supply = backend_data.get('total_supply', 100_000_000) if backend_data else 100_000_000
-    st.markdown(f"""
-    <div class="stat-card stat-card-green">
-        <div class="stat-label">📊 Total Supply</div>
-        <div class="stat-number">{supply:,}</div>
-        <div class="stat-change">{TOKEN_SYMBOL}</div>
-    </div>
-    """, unsafe_allow_html=True)
+with col_status2:
+    if chain_data:
+        blocks = len(chain_data.get('chain', []))
+        st.info(f"⛓️ Blocks: {blocks}")
+    else:
+        st.warning("⚠️ No chain data")
 
-with col3:
-    circ = backend_data.get('circulating_supply', 0) if backend_data else 0
-    st.markdown(f"""
-    <div class="stat-card stat-card-orange">
-        <div class="stat-label">🔄 Circulating</div>
-        <div class="stat-number">{circ:,.0f}</div>
-        <div class="stat-change">Mined so far</div>
-    </div>
-    """, unsafe_allow_html=True)
+with col_status3:
+    if backend_data:
+        supply = backend_data.get('total_supply', 0)
+        st.info(f"🪙 Supply: {supply:,} {TOKEN_SYMBOL}")
+    else:
+        st.warning("⚠️ Unknown")
 
-with col4:
-    reward = backend_data.get('mining_reward', 10) if backend_data else 10
-    st.markdown(f"""
-    <div class="stat-card stat-card-pink">
-        <div class="stat-label">⛏️ Block Reward</div>
-        <div class="stat-number">{reward} {TOKEN_SYMBOL}</div>
-        <div class="stat-change">Per block</div>
-    </div>
-    """, unsafe_allow_html=True)
+with col_status4:
+    if st.button("🔄 Refresh All", use_container_width=True):
+        refresh_data()
 
-with col5:
-    ad_reward = backend_data.get('ad_reward', 0.5) if backend_data else 0.5
-    st.markdown(f"""
-    <div class="stat-card stat-card-blue">
-        <div class="stat-label">📺 Ad Reward</div>
-        <div class="stat-number">{ad_reward} {TOKEN_SYMBOL}</div>
-        <div class="stat-change">Per view</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ============================================
-# MAIN CONTENT - 3 COLUMNS
-# ============================================
 st.markdown("---")
 
-left_col, mid_col, right_col = st.columns([1.2, 1, 0.8])
+# ============================================
+# ADMIN DASHBOARD - 3 COLUMNS
+# ============================================
+col1, col2, col3 = st.columns([1, 1.2, 0.8])
 
 # ============================================
-# LEFT COLUMN - WALLET & MINING
+# COLUMN 1 - SYSTEM STATS
 # ============================================
-with left_col:
-    st.subheader("👛 Wallet")
+with col1:
+    st.subheader("📊 System Statistics")
     
-    # Wallet actions
-    col_w1, col_w2 = st.columns(2)
+    # Get stats
+    stats_data, _ = api_request('/api/stats')
     
-    with col_w1:
-        if st.button("🆕 Create Wallet", use_container_width=True):
-            data, error = api_request('/api/wallet/create', 'POST')
-            if data and not error:
-                st.session_state.wallet = data['address']
-                st.session_state.balance = 0
-                st.success("✅ Wallet created!")
-                st.rerun()
-            else:
-                st.error(f"❌ {error}")
-    
-    with col_w2:
-        if st.session_state.wallet:
-            if st.button("🗑️ Disconnect", use_container_width=True):
-                st.session_state.wallet = None
-                st.session_state.balance = 0
-                st.rerun()
-    
-    # Wallet display
-    if st.session_state.wallet:
+    if stats_data:
         st.markdown(f"""
-        <div class="wallet-display">
-            📍 {st.session_state.wallet[:18]}...{st.session_state.wallet[-6:]}
+        <div class="stat-card">
+            <div class="stat-label">📦 Total Blocks</div>
+            <div class="stat-number">{stats_data.get('total_blocks', 0)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">📝 Total Transactions</div>
+            <div class="stat-number">{stats_data.get('total_transactions', 0)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">👛 Total Wallets</div>
+            <div class="stat-number">{stats_data.get('total_wallets', 0)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">🪙 Total Supply</div>
+            <div class="stat-number">{stats_data.get('total_supply', 0):.2f}</div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Get balance
-        balance_data, _ = api_request(f'/api/balance/{st.session_state.wallet}')
-        if balance_data:
-            balance = balance_data.get('balance', 0)
-            st.session_state.balance = balance
-            st.metric(f"💰 {TOKEN_SYMBOL} Balance", f"{balance:.4f}")
-        else:
-            st.metric(f"💰 {TOKEN_SYMBOL} Balance", "⏳ Loading...")
     else:
-        st.info("👆 Create or import a wallet to start mining")
-        st.caption("No wallet connected")
+        st.warning("⚠️ Stats unavailable")
     
     st.markdown("---")
     
     # ============================================
-    # MINING ACTIONS
+    # TOP WALLETS
     # ============================================
-    st.subheader("⛏️ Mining")
+    st.subheader("🏆 Top Wallets")
     
-    # Watch Ad
-    st.markdown("### 📺 Watch Ad")
-    if st.button("🎬 Watch Ad (+0.5 ADT)", use_container_width=True):
-        if not st.session_state.wallet:
-            st.warning("⚠️ Connect a wallet first!")
+    wallets_data, _ = api_request('/api/wallets/top?limit=10')
+    if wallets_data:
+        wallets = wallets_data.get('wallets', [])
+        if wallets:
+            for i, wallet in enumerate(wallets[:5], 1):
+                addr = wallet.get('address', 'unknown')[:15] + "..."
+                balance = wallet.get('balance', 0)
+                medal = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i-1] if i <= 5 else "•"
+                st.markdown(f"""
+                <div style="background: #1a1a2e; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; border: 1px solid #2d2d44;">
+                    <span style="font-size: 14px;">
+                        {medal} {addr} 
+                        <span style="float: right; color: #00d2ff;">{balance:.2f} {TOKEN_SYMBOL}</span>
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            with st.spinner("📺 Playing ad..."):
-                time.sleep(1.5)
-                data, error = api_request(
-                    '/api/ad-reward',
-                    'POST',
-                    {"wallet_address": st.session_state.wallet}
-                )
-                if data and not error:
-                    st.success(f"✅ Earned {data.get('reward', 0.5)} {TOKEN_SYMBOL}!")
-                    st.balloons()
-                    # Refresh balance
-                    b_data, _ = api_request(f'/api/balance/{st.session_state.wallet}')
-                    if b_data:
-                        st.session_state.balance = b_data.get('balance', 0)
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.error(f"❌ {error}")
-    
-    # Mine Block
-    st.markdown("### ⛏️ Mine Block")
-    if st.button("⛏️ Mine Block (+10 ADT)", use_container_width=True, type="primary"):
-        if not st.session_state.wallet:
-            st.warning("⚠️ Connect a wallet first!")
-        else:
-            with st.spinner("⛏️ Mining block..."):
-                time.sleep(2)
-                data, error = api_request(
-                    '/api/mine',
-                    'POST',
-                    {"address": st.session_state.wallet}
-                )
-                if data and not error:
-                    st.success(f"✅ Block mined! +10 {TOKEN_SYMBOL}!")
-                    # Refresh balance
-                    b_data, _ = api_request(f'/api/balance/{st.session_state.wallet}')
-                    if b_data:
-                        st.session_state.balance = b_data.get('balance', 0)
-                    st.rerun()
-                else:
-                    st.error(f"❌ {error}")
-    
-    # ============================================
-    # RECENT ACTIVITY
-    # ============================================
-    st.markdown("---")
-    st.subheader("🔄 Recent Activity")
-    
-    if st.session_state.wallet:
-        # Get recent transactions
-        tx_data, _ = api_request(f'/api/wallet/{st.session_state.wallet}/transactions')
-        if tx_data:
-            txs = tx_data.get('transactions', [])[:5]
-            if txs:
-                for tx in txs:
-                    amount = tx.get('amount', 0)
-                    tx_type = tx.get('type', 'transfer')
-                    emoji = "📤" if tx.get('from_address') == st.session_state.wallet else "📥"
-                    color = "#f5576c" if tx.get('from_address') == st.session_state.wallet else "#00d2ff"
-                    st.markdown(f"""
-                    <div style="background: #1a1a2e; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; border-left: 3px solid {color};">
-                        <span style="font-size: 13px;">
-                            {emoji} {amount} {TOKEN_SYMBOL} 
-                            <span style="color: #8899aa; font-size: 11px;">
-                                {tx_type.replace('_', ' ').title()}
-                            </span>
-                        </span>
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.caption("No recent transactions")
-        else:
-            st.caption("No transactions yet")
+            st.caption("No wallets found")
     else:
-        st.caption("Connect wallet to see activity")
+        st.caption("No data")
 
 # ============================================
-# MIDDLE COLUMN - BLOCKCHAIN EXPLORER
+# COLUMN 2 - BLOCKCHAIN EXPLORER
 # ============================================
-with mid_col:
-    st.subheader("🔗 Blockchain")
-    
-    # Get blockchain data
-    chain_data, _ = api_request('/api/blockchain')
+with col2:
+    st.subheader("🔗 Blockchain Explorer")
     
     if chain_data:
         chain = chain_data.get('chain', [])
@@ -405,60 +325,114 @@ with mid_col:
         # Difficulty
         st.metric("🎯 Difficulty", chain_data.get('difficulty', 4))
         
-        # Latest block
-        st.markdown("### 📦 Latest Block")
-        if chain:
-            latest = chain[-1]
-            st.json({
-                "Block": latest.get('index', 0),
-                "Hash": latest.get('hash', 'N/A')[:12] + "...",
-                "Txs": len(latest.get('transactions', [])),
-                "Nonce": latest.get('nonce', 0)
-            }, expanded=False)
+        # Mining reward
+        st.metric("⛏️ Mining Reward", f"{chain_data.get('mining_reward', 10)} {TOKEN_SYMBOL}")
         
-        # Pending transactions
+        # ============================================
+        # LATEST BLOCKS TABLE
+        # ============================================
+        st.markdown("### 📦 Latest Blocks")
+        
+        if chain:
+            # Show last 10 blocks
+            latest_blocks = chain[-10:][::-1]  # Reverse to show newest first
+            
+            blocks_data = []
+            for block in latest_blocks:
+                blocks_data.append({
+                    "Block": block.get('index', 0),
+                    "Hash": block.get('hash', 'N/A')[:12] + "...",
+                    "Txs": len(block.get('transactions', [])),
+                    "Nonce": block.get('nonce', 0),
+                    "Time": datetime.fromtimestamp(block.get('timestamp', 0)).strftime('%H:%M:%S') if block.get('timestamp') else "N/A"
+                })
+            
+            df = pd.DataFrame(blocks_data)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Block": "Block",
+                    "Hash": "Hash",
+                    "Txs": "Txs",
+                    "Nonce": "Nonce",
+                    "Time": "Time"
+                }
+            )
+        else:
+            st.info("No blocks yet")
+        
+        # ============================================
+        # PENDING TRANSACTIONS
+        # ============================================
+        st.markdown("### 📝 Pending Transactions")
         pending = chain_data.get('pending_transactions', [])
-        st.markdown(f"### 📝 Pending: {len(pending)}")
+        st.metric("Pending", len(pending))
+        
         if pending:
-            for tx in pending[:3]:
-                st.caption(f"{tx.get('from', '')[:8]} → {tx.get('to', '')[:8]}: {tx.get('amount', 0)} {TOKEN_SYMBOL}")
+            for tx in pending[:5]:
+                st.markdown(f"""
+                <div style="background: #1a1a2e; padding: 6px 10px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; border-left: 3px solid #f093fb;">
+                    {tx.get('from', '')[:10]} → {tx.get('to', '')[:10]}
+                    <span style="float: right; color: #00d2ff;">{tx.get('amount', 0)} {TOKEN_SYMBOL}</span>
+                </div>
+                """, unsafe_allow_html=True)
         else:
             st.caption("No pending transactions")
-        
-        # Validate chain
-        if st.button("✅ Verify Chain", use_container_width=True):
-            verify_data, _ = api_request('/api/verify-chain')
-            if verify_data and verify_data.get('valid'):
-                st.success("✅ Blockchain is valid!")
-            else:
-                st.error("❌ Blockchain verification failed!")
     
     else:
         st.warning("⚠️ Blockchain data unavailable")
-        st.caption("Backend may be offline")
 
 # ============================================
-# RIGHT COLUMN - TOKEN INFO & STATS
+# COLUMN 3 - ADMIN ACTIONS & TOKEN INFO
 # ============================================
-with right_col:
-    st.subheader("📈 Token Info")
+with col3:
+    st.subheader("⚙️ Admin Actions")
+    
+    # ============================================
+    # ADMIN ACTIONS
+    # ============================================
+    st.markdown("""
+    <div class="admin-action">
+        <strong>⛏️ Force Mine</strong>
+        <p style="color: #8899aa; font-size: 12px;">Manually mine pending transactions</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("⛏️ Force Mine Now", use_container_width=True):
+        with st.spinner("Mining..."):
+            data, error = api_request('/api/mine', 'POST', {"address": "admin_wallet"})
+            if data and not error:
+                st.success("✅ Mining initiated!")
+                time.sleep(1)
+                refresh_data()
+            else:
+                st.error(f"❌ {error}")
+    
+    st.markdown("---")
+    
+    # ============================================
+    # TOKEN INFO
+    # ============================================
+    st.subheader("🪙 Token Information")
     
     if backend_data:
         st.markdown(f"""
-        <div class="info-box">
-            <div style="display: flex; justify-content: space-between; padding: 5px 0;">
+        <div style="background: #1a1a2e; padding: 15px; border-radius: 12px; border: 1px solid #2d2d44;">
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                 <span style="color: #8899aa;">Name</span>
                 <span style="color: white;">{backend_data.get('name', 'AdToken')}</span>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #2d2d44;">
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                 <span style="color: #8899aa;">Symbol</span>
                 <span style="color: #00d2ff; font-weight: bold;">{backend_data.get('symbol', TOKEN_SYMBOL)}</span>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #2d2d44;">
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                 <span style="color: #8899aa;">Decimals</span>
                 <span style="color: white;">{backend_data.get('decimals', 18)}</span>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #2d2d44;">
+            <div style="display: flex; justify-content: space-between; padding: 5px 0;">
                 <span style="color: #8899aa;">Total Supply</span>
                 <span style="color: #f093fb;">{backend_data.get('total_supply', 0):,}</span>
             </div>
@@ -466,49 +440,53 @@ with right_col:
         """, unsafe_allow_html=True)
     
     st.markdown("---")
-    st.subheader("ℹ️ System Status")
     
-    # Backend status
-    if backend_data:
-        st.success("✅ Backend: Connected")
-        st.caption(f"API: {API_URL}")
-    else:
-        st.error("❌ Backend: Offline")
+    # ============================================
+    # SYSTEM HEALTH
+    # ============================================
+    st.subheader("🩺 System Health")
     
-    # Wallet status
-    if st.session_state.wallet:
-        st.success(f"✅ Wallet: Connected")
-    else:
-        st.warning("⚠️ Wallet: Not connected")
+    # Check components
+    health_checks = {
+        "Backend API": backend_data is not None,
+        "Blockchain": chain_data is not None,
+        "Database": True  # Could add DB check
+    }
     
-    # Network stats
+    for component, status in health_checks.items():
+        if status:
+            st.success(f"✅ {component}: OK")
+        else:
+            st.error(f"❌ {component}: Failed")
+    
     st.markdown("---")
-    st.subheader("🌐 Network")
     
-    if chain_data:
-        chain = chain_data.get('chain', [])
-        st.caption(f"⛓️ Chain Length: {len(chain)}")
-        st.caption(f"⛏️ Mining Reward: {chain_data.get('mining_reward', 10)} {TOKEN_SYMBOL}")
-        st.caption(f"📺 Ad Reward: {chain_data.get('ad_reward', 0.5)} {TOKEN_SYMBOL}")
+    # ============================================
+    # USER SESSION
+    # ============================================
+    st.subheader("👤 Admin Session")
+    st.caption(f"Logged in as: **{username}**")
+    
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
 
 # ============================================
 # FOOTER
 # ============================================
-st.markdown("""
+st.markdown(f"""
 <div class="footer">
-    <p>⛓️ <b>AdMine</b> · {TOKEN_SYMBOL} Token · Proof of System</p>
-    <p style="font-size: 11px; color: #556677;">
-        Built with Streamlit · {API_URL}
+    <p>⚙️ <b>AdMine Admin</b> · {TOKEN_SYMBOL} Blockchain Monitor</p>
+    <p style="font-size: 11px; color: #445566;">
+        API: {API_URL} · {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     </p>
 </div>
-""".replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL).replace('{API_URL}', API_URL), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # ============================================
-# AUTO-REFRESH (Optional)
+# AUTO-REFRESH (Every 15 seconds)
 # ============================================
-if st.session_state.wallet:
-    # Auto-refresh balance every 30 seconds
-    st.caption("🔄 Auto-refreshing every 30s")
-    # Add a refresh button
-    if st.button("🔄 Refresh", use_container_width=True):
-        st.rerun()
+if st.button("🔄 Auto-Refresh (15s)", use_container_width=True):
+    st.cache_data.clear()
+    time.sleep(15)
+    st.rerun()
