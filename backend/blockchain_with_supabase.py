@@ -32,6 +32,11 @@ AD_REWARD = float(os.getenv('AD_REWARD', 0.5))
 DIFFICULTY = int(os.getenv('DIFFICULTY', 4))
 
 # ============================================
+# REFERRAL MODULE IMPORT
+# ============================================
+from referral import calculate_referral_rewards, get_referral_stats
+
+# ============================================
 # BLOCK CLASS
 # ============================================
 class Block:
@@ -290,7 +295,7 @@ class Blockchain:
         return True
 
     # ============================================
-    # TIME-BASED MINING METHODS WITH SESSION TRACKING
+    # TIME-BASED MINING METHODS WITH SESSION TRACKING & REFERRAL REWARDS
     # ============================================
 
     def start_mining(self, address):
@@ -337,7 +342,7 @@ class Blockchain:
         }
 
     def stop_mining(self, address):
-        """Stop mining and claim rewards, update session"""
+        """Stop mining and claim rewards with referral bonuses"""
         wallet = supabase_client.get_wallet(address)
         if not wallet:
             return {"error": "Wallet not found"}
@@ -357,12 +362,27 @@ class Blockchain:
         current_balance = wallet.get('balance', 0)
         total_mined = wallet.get('total_mined', 0) + reward
         
+        # ============================================
+        # REFERRAL REWARDS CALCULATION
+        # ============================================
+        referral_rewards_distributed = []
+        if reward > 0:
+            try:
+                referral_rewards = calculate_referral_rewards(address, reward)
+                if referral_rewards:
+                    for reward_info in referral_rewards:
+                        print(f"✅ Referral reward: {reward_info['amount']} {TOKEN_SYMBOL} to {reward_info['address']} (Level {reward_info['level']})")
+                        referral_rewards_distributed.append(reward_info)
+                else:
+                    print(f"ℹ️ No referral rewards for {address}")
+            except Exception as e:
+                print(f"⚠️ Error calculating referral rewards: {e}")
+        
         # Update wallet
         supabase_client.update_mining_status(address, False, None, current_balance + reward, total_mined)
         
         # Update mining session
         try:
-            # Find active session for this wallet
             active_session = supabase_client.get_active_mining_session(address)
             if active_session:
                 updated = supabase_client.update_mining_session(
@@ -377,7 +397,6 @@ class Blockchain:
                 else:
                     print(f"⚠️ Failed to update mining session for {address}")
             else:
-                # If no active session found, create one
                 session_data = {
                     'wallet_address': address,
                     'start_time': mining_started.isoformat(),
@@ -416,7 +435,8 @@ class Blockchain:
             "reward": reward,
             "duration": f"{mining_duration/3600:.2f} hours",
             "new_balance": current_balance + reward,
-            "session_completed": now.isoformat()
+            "session_completed": now.isoformat(),
+            "referral_rewards": referral_rewards_distributed
         }
 
     def get_mining_status(self, address):
@@ -466,6 +486,9 @@ class Blockchain:
         sessions = supabase_client.get_mining_sessions(address)
         total_earned = sum([s.get('reward_earned', 0) for s in sessions]) if sessions else 0
         
+        # Get referral stats
+        referral_stats = get_referral_stats(address)
+        
         return {
             "address": address,
             "total_mined": wallet.get('total_mined', 0),
@@ -474,7 +497,8 @@ class Blockchain:
             "total_sessions": len(sessions),
             "total_earned": total_earned,
             "hourly_rate": self.hourly_rate,
-            "daily_cap": self.daily_cap
+            "daily_cap": self.daily_cap,
+            "referral_stats": referral_stats
         }
 
     def get_mining_sessions(self, address, limit=50):
@@ -508,6 +532,7 @@ try:
     print(f"📊 Max Supply: {blockchain.max_supply:,} {TOKEN_SYMBOL}")
     print(f"⛏️ Mining Rate: {blockchain.hourly_rate} {TOKEN_SYMBOL}/hour")
     print(f"📈 Daily Cap: {blockchain.daily_cap} {TOKEN_SYMBOL}/day")
+    print(f"🔗 Referral System: 5% Level 1, 2% Level 2")
 except Exception as e:
     print(f"❌ Error initializing blockchain: {e}")
     blockchain = None
