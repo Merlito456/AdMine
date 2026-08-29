@@ -1,30 +1,36 @@
 import hashlib
 import json
 import time
+import os
 from typing import List, Dict, Any
 from datetime import datetime
 from supabase_client import supabase_client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ============================================
-# TOKEN CONFIGURATION - 10 TRILLION
+# TOKEN CONFIGURATION - From Environment
 # ============================================
-TOKEN_SYMBOL = "ADT"
-TOKEN_NAME = "Ad Token"
-TOKEN_DECIMALS = 18
-TOTAL_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
-MAX_SUPPLY = 10_000_000_000_000   # 10 Trillion Max Supply
+TOKEN_SYMBOL = os.getenv('TOKEN_SYMBOL', 'ADT')
+TOKEN_NAME = os.getenv('TOKEN_NAME', 'Ad Token')
+TOKEN_DECIMALS = int(os.getenv('TOKEN_DECIMALS', 18))
+TOTAL_SUPPLY = int(os.getenv('TOTAL_SUPPLY', 10_000_000_000_000))  # 10 Trillion ADT
+MAX_SUPPLY = int(os.getenv('MAX_SUPPLY', 10_000_000_000_000))     # 10 Trillion Max Supply
+GENESIS_SUPPLY = int(os.getenv('GENESIS_SUPPLY', 1_000_000_000_000))  # 1 Trillion
 
 # ============================================
-# INITIAL SUPPLY DISTRIBUTION
+# MINING CONFIGURATION
 # ============================================
-GENESIS_SUPPLY = 1_000_000_000_000  # 1 Trillion for initial distribution
+MINING_REWARD = float(os.getenv('MINING_REWARD', 10))
+AD_REWARD = float(os.getenv('AD_REWARD', 0.5))
+DIFFICULTY = int(os.getenv('DIFFICULTY', 4))
 
-# ============================================
-# MINING CONFIGURATION (Adjusted for 10T Supply)
-# ============================================
-MINING_REWARD = 10       # ADT per mining reward (can adjust higher)
-AD_REWARD = 0.5          # ADT per ad view
-DIFFICULTY = 4           # Mining difficulty
+# Print config on startup
+print(f"🪙 Token: {TOKEN_SYMBOL} - {TOKEN_NAME}")
+print(f"📊 Total Supply: {TOTAL_SUPPLY:,}")
+print(f"📈 Max Supply: {MAX_SUPPLY:,}")
+print(f"🎯 Genesis Supply: {GENESIS_SUPPLY:,}")
 
 class Block:
     def __init__(self, index: int, transactions: List[Dict], timestamp: float, 
