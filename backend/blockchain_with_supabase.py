@@ -2,6 +2,8 @@ import hashlib
 import json
 import time
 import os
+import random
+import string
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase_client import supabase_client
@@ -35,6 +37,17 @@ DIFFICULTY = int(os.getenv('DIFFICULTY', 4))
 # REFERRAL MODULE IMPORT
 # ============================================
 from referral import calculate_referral_rewards, get_referral_stats
+
+# ============================================
+# HELPER FUNCTION - GENERATE REFERRAL CODE
+# ============================================
+def generate_referral_code():
+    """Generate a unique 8-character referral code"""
+    chars = string.ascii_uppercase + string.digits
+    # Avoid ambiguous characters (0, O, I, 1)
+    chars = chars.replace('0', '').replace('O', '').replace('I', '').replace('1', '')
+    code = ''.join(random.choices(chars, k=8))
+    return code
 
 # ============================================
 # BLOCK CLASS
@@ -174,8 +187,36 @@ class Blockchain:
                 print(f"✅ Created wallet: {wallet['address']}")
 
     def create_wallet(self, address, private_key, public_key):
-        """Create a new wallet"""
-        supabase_client.create_wallet(address, private_key, public_key)
+        """Create a new wallet with auto-generated referral code"""
+        # Create wallet
+        result = supabase_client.create_wallet(address, private_key, public_key)
+        
+        # Auto-generate referral code
+        if result:
+            # Generate unique 8-character code
+            code = generate_referral_code()
+            
+            # Ensure uniqueness
+            attempts = 0
+            while attempts < 10:
+                existing = supabase_client.get_wallet_by_referral_code(code)
+                if not existing:
+                    break
+                code = generate_referral_code()
+                attempts += 1
+            
+            # Save referral code to wallet
+            supabase_client.update_wallet(address, {'referral_code': code})
+            print(f"✅ Auto-generated referral code for {address}: {code}")
+            
+            # Return the created wallet with referral code
+            wallet = supabase_client.get_wallet(address)
+            if wallet:
+                wallet['referral_code'] = code
+            
+            return wallet
+        
+        return result
 
     def get_latest_block(self):
         return self.chain[-1]
@@ -533,6 +574,7 @@ try:
     print(f"⛏️ Mining Rate: {blockchain.hourly_rate} {TOKEN_SYMBOL}/hour")
     print(f"📈 Daily Cap: {blockchain.daily_cap} {TOKEN_SYMBOL}/day")
     print(f"🔗 Referral System: 5% Level 1, 2% Level 2")
+    print(f"🔑 Auto-generated referral codes on wallet creation")
 except Exception as e:
     print(f"❌ Error initializing blockchain: {e}")
     blockchain = None
