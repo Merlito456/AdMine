@@ -28,17 +28,21 @@ except Exception as e:
 TOKEN_SYMBOL = "ADT"
 TOKEN_NAME = "Ad Token"
 TOKEN_DECIMALS = 18
-MAX_SUPPLY = 100_000_000
 
 # ============================================
-# MINING CONFIG (Time-Based)
+# SUPPLY CONFIG - 10 TRILLION
+# ============================================
+MAX_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
+TOTAL_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
+
+# ============================================
+# MINING CONFIG (Adjusted for 10T supply)
 # ============================================
 MINING_CONFIG = {
-    'hourly_rate': 0.5,  # ADT per hour
-    'daily_cap': 12.0,   # Max ADT per 24 hours
-    'claim_interval_hours': 24,  # Claim every 24 hours
-    'mining_seconds': 86400,  # 24 hours in seconds
-}
+    'hourly_rate': 0.5,      # 0.5 ADT per hour (can adjust higher)
+    'daily_cap': 12.0,       # 12 ADT per day
+    'claim_interval_hours': 24,
+    'mining_seconds': 86400,
 
 # ============================================
 # BLOCK CLASS (Simplified - Only for ledger)
