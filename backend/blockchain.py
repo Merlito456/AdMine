@@ -5,11 +5,26 @@ from typing import List, Dict, Any
 from datetime import datetime
 from supabase_client import supabase_client
 
-# Token Configuration
+# ============================================
+# TOKEN CONFIGURATION - 10 TRILLION
+# ============================================
 TOKEN_SYMBOL = "ADT"
 TOKEN_NAME = "Ad Token"
 TOKEN_DECIMALS = 18
-TOTAL_SUPPLY = 100_000_000  # 100 Million ADT
+TOTAL_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
+MAX_SUPPLY = 10_000_000_000_000   # 10 Trillion Max Supply
+
+# ============================================
+# INITIAL SUPPLY DISTRIBUTION
+# ============================================
+GENESIS_SUPPLY = 1_000_000_000_000  # 1 Trillion for initial distribution
+
+# ============================================
+# MINING CONFIGURATION (Adjusted for 10T Supply)
+# ============================================
+MINING_REWARD = 10       # ADT per mining reward (can adjust higher)
+AD_REWARD = 0.5          # ADT per ad view
+DIFFICULTY = 4           # Mining difficulty
 
 class Block:
     def __init__(self, index: int, transactions: List[Dict], timestamp: float, 
@@ -50,12 +65,15 @@ class Block:
 
 class Blockchain:
     def __init__(self):
-        self.difficulty = 4
-        self.mining_reward = 10
-        self.ad_reward = 0.5
+        self.difficulty = DIFFICULTY
+        self.mining_reward = MINING_REWARD
+        self.ad_reward = AD_REWARD
         self.token_symbol = TOKEN_SYMBOL
         self.token_name = TOKEN_NAME
         self.total_supply = TOTAL_SUPPLY
+        self.max_supply = MAX_SUPPLY
+        self.genesis_supply = GENESIS_SUPPLY
+        self.circulating_supply = 0
         
         # Load chain from database or create genesis
         self.chain = []
@@ -87,16 +105,70 @@ class Blockchain:
             self.pending_transactions = [json.loads(tx['data']) for tx in pending]
             
             print(f"✅ Loaded {len(self.chain)} blocks from database")
+            print(f"🪙 Total Supply: {self.total_supply:,} {TOKEN_SYMBOL}")
 
     def create_genesis_block(self):
-        """Create and save genesis block"""
-        genesis_block = Block(0, [], time.time(), "0")
+        """Create and save genesis block with 1 Trillion ADT"""
+        print("🚀 Creating genesis block with 1 Trillion ADT...")
+        
+        # Set initial supply
+        self.genesis_supply = GENESIS_SUPPLY
+        self.total_supply = GENESIS_SUPPLY
+        self.circulating_supply = GENESIS_SUPPLY
+        
+        # Create genesis transaction
+        genesis_transactions = [
+            {
+                "from": "system",
+                "to": "admin_wallet",
+                "amount": self.genesis_supply,
+                "type": "genesis",
+                "token": TOKEN_SYMBOL,
+                "timestamp": time.time()
+            }
+        ]
+        
+        genesis_block = Block(0, genesis_transactions, time.time(), "0")
         genesis_block.mine_block(self.difficulty)
         self.chain.append(genesis_block)
         
         # Save to database
         supabase_client.save_block(genesis_block.to_dict())
-        print("✅ Genesis block created and saved to database")
+        
+        # Create admin wallet with genesis supply
+        supabase_client.create_wallet(
+            "admin_wallet",
+            "admin_private_key",
+            "admin_public_key"
+        )
+        supabase_client.update_balance("admin_wallet", self.genesis_supply)
+        
+        # Create system wallets
+        self.create_system_wallets()
+        
+        print(f"✅ Genesis block created!")
+        print(f"🪙 Initial Supply: {self.genesis_supply:,} {TOKEN_SYMBOL}")
+        print(f"📊 Max Supply: {self.max_supply:,} {TOKEN_SYMBOL}")
+
+    def create_system_wallets(self):
+        """Create system wallets"""
+        system_wallets = [
+            {"address": "system", "private_key": "system_private", "public_key": "system_public", "balance": 0},
+            {"address": "ad_system", "private_key": "adsystem_private", "public_key": "adsystem_public", "balance": 0},
+            {"address": "admin_wallet", "private_key": "admin_private", "public_key": "admin_public", "balance": self.genesis_supply}
+        ]
+        
+        for wallet in system_wallets:
+            existing = supabase_client.get_wallet(wallet['address'])
+            if not existing:
+                supabase_client.create_wallet(
+                    wallet['address'],
+                    wallet['private_key'],
+                    wallet['public_key']
+                )
+                if wallet['balance'] > 0:
+                    supabase_client.update_balance(wallet['address'], wallet['balance'])
+                print(f"✅ Created wallet: {wallet['address']}")
 
     def get_latest_block(self) -> Block:
         return self.chain[-1]
@@ -111,6 +183,15 @@ class Blockchain:
         supabase_client.save_transaction(tx_data)
 
     def mine_pending_transactions(self, mining_reward_address: str) -> None:
+        if not self.pending_transactions:
+            print("No pending transactions to mine")
+            return
+        
+        # Check if mining reward would exceed max supply
+        if self.total_supply + self.mining_reward > self.max_supply:
+            print(f"⚠️ Cannot mine: Would exceed max supply of {self.max_supply:,}")
+            return
+        
         # Add mining reward transaction
         reward_tx = {
             "from": "system",
@@ -121,6 +202,10 @@ class Blockchain:
             "timestamp": time.time()
         }
         self.pending_transactions.append(reward_tx)
+        
+        # Update supply
+        self.total_supply += self.mining_reward
+        self.circulating_supply += self.mining_reward
 
         # Create new block
         block = Block(
@@ -161,6 +246,7 @@ class Blockchain:
                     )
         
         self.pending_transactions = []
+        print(f"✅ Block {block.index} mined! Total Supply: {self.total_supply:,} {TOKEN_SYMBOL}")
 
     def get_balance(self, address: str) -> float:
         """Get balance from database"""
@@ -190,6 +276,10 @@ class Blockchain:
         if not wallet:
             return {"status": "error", "message": "Wallet not found"}
         
+        # Check if ad reward would exceed max supply
+        if self.total_supply + self.ad_reward > self.max_supply:
+            return {"status": "error", "message": "Max supply reached"}
+        
         # Create reward transaction
         transaction = {
             "from": "ad_system",
@@ -202,6 +292,10 @@ class Blockchain:
         
         # Add transaction
         self.add_transaction(transaction)
+        
+        # Update supply
+        self.total_supply += self.ad_reward
+        self.circulating_supply += self.ad_reward
         
         # Save ad reward record
         supabase_client.save_ad_reward(wallet_address, self.ad_reward)
@@ -227,13 +321,16 @@ class Blockchain:
             "name": TOKEN_NAME,
             "symbol": TOKEN_SYMBOL,
             "decimals": TOKEN_DECIMALS,
-            "total_supply": TOTAL_SUPPLY,
+            "total_supply": self.total_supply,
+            "max_supply": self.max_supply,
+            "genesis_supply": self.genesis_supply,
             "circulating_supply": stats['total_supply'],
             "mining_reward": self.mining_reward,
             "ad_reward": self.ad_reward,
+            "difficulty": self.difficulty,
             "total_blocks": stats['total_blocks'],
             "total_wallets": stats['total_wallets'],
-            "avg_block_time": stats['avg_block_time']
+            "avg_block_time": stats.get('avg_block_time', 0)
         }
 
     def to_dict(self) -> Dict:
@@ -241,8 +338,13 @@ class Blockchain:
             "chain": [block.to_dict() for block in self.chain],
             "pending_transactions": self.pending_transactions,
             "difficulty": self.difficulty,
+            "mining_reward": self.mining_reward,
+            "ad_reward": self.ad_reward,
             "token_info": self.get_token_info()
         }
 
 # Singleton instance
 blockchain = Blockchain()
+print(f"✅ Blockchain initialized with {len(blockchain.chain)} blocks")
+print(f"🪙 Total Supply: {blockchain.total_supply:,} {TOKEN_SYMBOL}")
+print(f"📊 Max Supply: {blockchain.max_supply:,} {TOKEN_SYMBOL}")
