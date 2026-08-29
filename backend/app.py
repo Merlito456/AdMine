@@ -99,14 +99,20 @@ def create_wallet():
         public_key = hashlib.sha256(private_key.encode()).hexdigest()
         address = hashlib.sha256(public_key.encode()).hexdigest()[:40]
         
-        blockchain.create_wallet(address, private_key, public_key)
+        # Create wallet with auto-generated referral code
+        result = blockchain.create_wallet(address, private_key, public_key)
+        
+        # Get the generated referral code
+        wallet = supabase_client.get_wallet(address)
+        referral_code = wallet.get('referral_code') if wallet else None
         
         return jsonify({
             "address": address,
             "private_key": private_key,
             "public_key": public_key,
             "balance": 0,
-            "token": TOKEN_SYMBOL
+            "token": TOKEN_SYMBOL,
+            "referral_code": referral_code  # Auto-generated
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -500,7 +506,7 @@ def reset_blockchain():
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    """Register a new user"""
+    """Register a new user with auto-generated referral code"""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -510,6 +516,14 @@ def register():
         return jsonify({'error': 'Email and password required'}), 400
     
     result, status = auth_register(email, password, username)
+    
+    # Add referral code to response if available
+    if status == 201 and result.get('user'):
+        # Get user's referral code from the result
+        if result['user'].get('referral_code'):
+            # Already included in auth_register response
+            pass
+    
     return jsonify(result), status
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -549,7 +563,7 @@ def profile():
 @app.route('/api/auth/wallet/create', methods=['POST'])
 @require_auth
 def create_user_wallet():
-    """Create a wallet for the current user"""
+    """Create a wallet for the current user with auto-generated referral code"""
     user = get_current_user()
     result, status = create_wallet_for_user(user['user_id'])
     return jsonify(result), status
