@@ -1,7 +1,9 @@
 import os
-from supabase import create_client, Client
-from datetime import datetime
+import time
+import hashlib
 import json
+from supabase import create_client, Client
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,51 +17,27 @@ class SupabaseClient:
         if not self.url or not self.key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
         
-        # Use service role for backend operations if available
         key_to_use = self.service_role if self.service_role else self.key
         self.client: Client = create_client(self.url, key_to_use)
         
         print(f"✅ Supabase client initialized")
         print(f"📡 URL: {self.url}")
-        
-        # Don't auto-initialize tables to avoid errors
-        # self.init_tables()
-    
-    def init_tables(self):
-        """Initialize database tables - called manually if needed"""
-        try:
-            # Check if wallets table exists by trying to insert a test record
-            # This will fail if table doesn't exist, which is fine
-            pass
-        except Exception as e:
-            print(f"⚠️ Tables may need to be created: {e}")
-    
-    def get_all_wallets(self, limit=100):
-        """Get all wallets with balances"""
-        try:
-            result = self.client.table('wallets')\
-                .select('*')\
-                .order('balance', desc=True)\
-                .limit(limit)\
-                .execute()
-            return result.data
-        except Exception as e:
-            print(f"❌ Error getting wallets: {e}")
-            return []
+
+    # ============================================
+    # WALLET OPERATIONS
+    # ============================================
 
     def create_wallet(self, address, private_key, public_key):
-        """Create new wallet with proper values"""
+        """Create new wallet"""
         try:
-            # Check if wallet already exists
             existing = self.get_wallet(address)
             if existing:
-                print(f"ℹ️ Wallet {address} already exists")
                 return existing
             
             data = {
                 'address': address,
-                'private_key': private_key,  # Must NOT be null
-                'public_key': public_key,    # Must NOT be null
+                'private_key': private_key,
+                'public_key': public_key,
                 'balance': 0,
                 'total_ads_watched': 0,
                 'total_ad_rewards': 0,
@@ -68,8 +46,8 @@ class SupabaseClient:
                 'mining_accumulated': 0,
                 'total_mined': 0,
                 'app_version': '1.0.0',
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             result = self.client.table('wallets').insert(data).execute()
             return result.data[0] if result.data else None
@@ -89,28 +67,33 @@ class SupabaseClient:
             print(f"❌ Error getting wallet: {e}")
             return None
 
-    def update_balance(self, address, balance):
-        """Update wallet balance"""
+    def update_wallet(self, address, data):
+        """Update wallet data"""
         try:
-            data = {
-                'balance': float(balance),
-                'updated_at': datetime.utcnow().isoformat()
-            }
             result = self.client.table('wallets')\
                 .update(data)\
                 .eq('address', address)\
                 .execute()
             return result.data[0] if result.data else None
         except Exception as e:
+            print(f"❌ Error updating wallet: {e}")
+            return None
+
+    def update_balance(self, address, balance):
+        """Update wallet balance"""
+        try:
+            data = {'balance': float(balance), 'updated_at': datetime.now(timezone.utc).isoformat()}
+            return self.update_wallet(address, data)
+        except Exception as e:
             print(f"❌ Error updating balance: {e}")
             return None
 
     def update_mining_status(self, address, active, started_at=None, balance=None, total_mined=None):
-        """Update mining status for a wallet"""
+        """Update mining status"""
         try:
             data = {
                 'mining_active': active,
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             if started_at:
                 data['mining_started'] = started_at
@@ -119,14 +102,27 @@ class SupabaseClient:
             if total_mined is not None:
                 data['total_mined'] = float(total_mined)
             
-            result = self.client.table('wallets')\
-                .update(data)\
-                .eq('address', address)\
-                .execute()
-            return result.data[0] if result.data else None
+            return self.update_wallet(address, data)
         except Exception as e:
             print(f"❌ Error updating mining status: {e}")
             return None
+
+    def get_all_wallets(self, limit=100):
+        """Get all wallets"""
+        try:
+            result = self.client.table('wallets')\
+                .select('*')\
+                .order('balance', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting wallets: {e}")
+            return []
+
+    # ============================================
+    # BLOCK OPERATIONS
+    # ============================================
 
     def save_block(self, block_data):
         """Save block to database"""
@@ -163,13 +159,17 @@ class SupabaseClient:
         try:
             result = self.client.table('blocks')\
                 .select('*')\
-                .order('index', asc=True)\
+                .order('index')\
                 .limit(limit)\
                 .execute()
             return result.data
         except Exception as e:
             print(f"❌ Error getting blocks: {e}")
             return []
+
+    # ============================================
+    # TRANSACTION OPERATIONS
+    # ============================================
 
     def save_transaction(self, transaction):
         """Save transaction to database"""
@@ -194,9 +194,22 @@ class SupabaseClient:
 
     def generate_tx_hash(self, transaction):
         """Generate transaction hash"""
-        import hashlib
         tx_string = f"{transaction.get('from', '')}{transaction.get('to', '')}{transaction.get('amount', 0)}{transaction.get('timestamp', time.time())}"
         return hashlib.sha256(tx_string.encode()).hexdigest()
+
+    def get_transactions(self, address, limit=50):
+        """Get transactions for a wallet"""
+        try:
+            result = self.client.table('transactions')\
+                .select('*')\
+                .or_(f'from_address.eq.{address},to_address.eq.{address}')\
+                .order('timestamp', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting transactions: {e}")
+            return []
 
     def get_pending_transactions(self, limit=50):
         """Get pending transactions"""
@@ -212,19 +225,287 @@ class SupabaseClient:
             print(f"❌ Error getting pending transactions: {e}")
             return []
 
-    def save_ad_reward(self, wallet_address, reward_amount):
+    # ============================================
+    # AD REWARD OPERATIONS
+    # ============================================
+
+    def save_ad_reward(self, wallet_address, reward_amount, ad_type='rewarded', ad_unit_id=''):
         """Save ad reward record"""
         try:
             data = {
                 'wallet_address': wallet_address,
                 'reward_amount': float(reward_amount),
-                'timestamp': datetime.utcnow().isoformat()
+                'ad_type': ad_type,
+                'ad_unit_id': ad_unit_id,
+                'reward_claimed': True,
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
             result = self.client.table('ad_rewards').insert(data).execute()
+            
+            # Also record in watch history
+            history_data = {
+                'wallet_address': wallet_address,
+                'ad_type': ad_type,
+                'ad_unit_id': ad_unit_id,
+                'reward_amount': float(reward_amount),
+                'reward_claimed': True,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            self.client.table('ad_watch_history').insert(history_data).execute()
+            
             return result.data[0] if result.data else None
         except Exception as e:
             print(f"❌ Error saving ad reward: {e}")
             return None
+
+    def get_ad_history(self, address, limit=50):
+        """Get ad watching history for a wallet"""
+        try:
+            result = self.client.table('ad_watch_history')\
+                .select('*')\
+                .eq('wallet_address', address)\
+                .order('timestamp', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting ad history: {e}")
+            return []
+
+    def get_ad_stats(self):
+        """Get global ad statistics"""
+        try:
+            # Total ad views
+            views = self.client.table('ad_watch_history').select('*', count='exact').execute()
+            
+            # Total rewards
+            rewards = self.client.table('ad_watch_history')\
+                .select('reward_amount')\
+                .execute()
+            total_rewards = sum([r['reward_amount'] for r in rewards.data]) if rewards.data else 0
+            
+            return {
+                'total_ad_views': views.count if hasattr(views, 'count') else 0,
+                'total_ad_rewards': total_rewards
+            }
+        except Exception as e:
+            print(f"❌ Error getting ad stats: {e}")
+            return {'total_ad_views': 0, 'total_ad_rewards': 0}
+
+    # ============================================
+    # MINING SESSION OPERATIONS
+    # ============================================
+
+    def create_mining_session(self, session_data):
+        """Create a new mining session"""
+        try:
+            result = self.client.table('mining_sessions').insert(session_data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error creating mining session: {e}")
+            return None
+
+    def get_active_mining_session(self, address):
+        """Get active mining session for a wallet"""
+        try:
+            result = self.client.table('mining_sessions')\
+                .select('*')\
+                .eq('wallet_address', address)\
+                .eq('status', 'active')\
+                .order('start_time', desc=True)\
+                .limit(1)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error getting active mining session: {e}")
+            return None
+
+    def update_mining_session(self, session_id, end_time, status, reward_earned, duration_seconds):
+        """Update a mining session"""
+        try:
+            data = {
+                'end_time': end_time,
+                'status': status,
+                'reward_earned': reward_earned,
+                'reward_amount': reward_earned,
+                'duration_seconds': duration_seconds
+            }
+            result = self.client.table('mining_sessions')\
+                .update(data)\
+                .eq('id', session_id)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error updating mining session: {e}")
+            return None
+
+    def get_mining_sessions(self, address, limit=50):
+        """Get mining sessions for a wallet"""
+        try:
+            result = self.client.table('mining_sessions')\
+                .select('*')\
+                .eq('wallet_address', address)\
+                .order('start_time', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting mining sessions: {e}")
+            return []
+
+    def get_mining_stats(self, address):
+        """Get mining statistics for a wallet"""
+        try:
+            wallet = self.get_wallet(address)
+            if not wallet:
+                return None
+            
+            sessions = self.get_mining_sessions(address)
+            total_mined = sum([s.get('reward_earned', 0) for s in sessions]) if sessions else 0
+            
+            return {
+                'address': address,
+                'total_mined': wallet.get('total_mined', 0),
+                'balance': wallet.get('balance', 0),
+                'mining_active': wallet.get('mining_active', False),
+                'total_sessions': len(sessions),
+                'total_earned': total_mined
+            }
+        except Exception as e:
+            print(f"❌ Error getting mining stats: {e}")
+            return None
+
+    # ============================================
+    # REFERRAL OPERATIONS
+    # ============================================
+
+    def create_referral(self, referrer_address, referred_address):
+        """Create a referral record"""
+        try:
+            data = {
+                'referrer_address': referrer_address,
+                'referred_address': referred_address,
+                'status': 'pending'
+            }
+            result = self.client.table('referrals').insert(data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error creating referral: {e}")
+            return None
+
+    def complete_referral(self, referral_id, reward_amount):
+        """Complete a referral"""
+        try:
+            data = {
+                'status': 'completed',
+                'reward_earned': float(reward_amount),
+                'completed_at': datetime.now(timezone.utc).isoformat()
+            }
+            result = self.client.table('referrals')\
+                .update(data)\
+                .eq('id', referral_id)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error completing referral: {e}")
+            return None
+
+    def get_referrals(self, address):
+        """Get referrals for a wallet"""
+        try:
+            result = self.client.table('referrals')\
+                .select('*')\
+                .eq('referrer_address', address)\
+                .order('created_at', desc=True)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting referrals: {e}")
+            return []
+
+    # ============================================
+    # ANALYTICS OPERATIONS
+    # ============================================
+
+    def track_analytics(self, wallet_address, session_id, screen_name, action_type, action_data=None):
+        """Track user analytics"""
+        try:
+            data = {
+                'wallet_address': wallet_address,
+                'session_id': session_id,
+                'screen_name': screen_name,
+                'action_type': action_type,
+                'action_data': action_data or {},
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            result = self.client.table('app_analytics').insert(data).execute()
+            
+            # Update last active
+            self.update_wallet(wallet_address, {
+                'last_active': datetime.now(timezone.utc).isoformat()
+            })
+            
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error tracking analytics: {e}")
+            return None
+
+    def get_user_analytics(self, address, limit=50):
+        """Get user analytics"""
+        try:
+            result = self.client.table('app_analytics')\
+                .select('*')\
+                .eq('wallet_address', address)\
+                .order('timestamp', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting user analytics: {e}")
+            return []
+
+    # ============================================
+    # CONFIG OPERATIONS
+    # ============================================
+
+    def get_config(self, key):
+        """Get configuration value"""
+        try:
+            result = self.client.table('config')\
+                .select('value')\
+                .eq('key', key)\
+                .execute()
+            return result.data[0]['value'] if result.data else None
+        except Exception as e:
+            print(f"❌ Error getting config: {e}")
+            return None
+
+    def set_config(self, key, value):
+        """Set configuration value"""
+        try:
+            data = {
+                'key': key,
+                'value': json.dumps(value) if isinstance(value, dict) else str(value),
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            # Check if exists
+            existing = self.client.table('config').select('*').eq('key', key).execute()
+            if existing.data:
+                result = self.client.table('config')\
+                    .update(data)\
+                    .eq('key', key)\
+                    .execute()
+            else:
+                data['created_at'] = datetime.now(timezone.utc).isoformat()
+                result = self.client.table('config').insert(data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error setting config: {e}")
+            return None
+
+    # ============================================
+    # STATS OPERATIONS
+    # ============================================
 
     def get_blockchain_stats(self):
         """Get blockchain statistics"""
@@ -234,7 +515,7 @@ class SupabaseClient:
             txs = self.client.table('transactions').select('*', count='exact').execute()
             wallets = self.client.table('wallets').select('*', count='exact').execute()
             
-            # Get total supply from wallets
+            # Get total supply
             wallet_data = self.client.table('wallets').select('balance').execute()
             total_supply = sum([w['balance'] for w in wallet_data.data]) if wallet_data.data else 0
             
@@ -255,8 +536,17 @@ class SupabaseClient:
                 'avg_block_time': 0
             }
 
-# Import time for generate_tx_hash
-import time
+    def get_user_stats(self, address):
+        """Get user statistics from view"""
+        try:
+            result = self.client.table('user_stats')\
+                .select('*')\
+                .eq('address', address)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error getting user stats: {e}")
+            return None
 
 # Initialize client
 supabase_client = SupabaseClient()
