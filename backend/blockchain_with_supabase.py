@@ -2,7 +2,7 @@ import hashlib
 import json
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +13,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://mydbvqyxoxqzluslpavh.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'sb_publishable_7An_A_PQbrrTzpyrSKOEgw_dPf5mj_o')
 
+# Initialize Supabase
 try:
     from supabase import create_client, Client
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -60,6 +61,13 @@ class Block:
             "nonce": self.nonce
         }, sort_keys=True)
         return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def mine_block(self, difficulty):
+        target = "0" * difficulty
+        while self.hash[:difficulty] != target:
+            self.nonce += 1
+            self.hash = self.calculate_hash()
+        return self.hash
 
     def to_dict(self):
         return {
@@ -158,9 +166,8 @@ class Blockchain:
             # Check if mining_sessions table exists
             supabase.table('mining_sessions').select('*').limit(1).execute()
         except:
-            # Create mining_sessions table
-            print("📊 Creating mining_sessions table...")
             # Table will be created via SQL
+            print("📊 Mining tables need to be created via SQL")
     
     def create_genesis_block(self):
         """Create and save genesis block"""
@@ -205,7 +212,7 @@ class Blockchain:
         system_wallets = [
             {"address": "system", "private_key": "system_private", "public_key": "system_public", "balance": 0},
             {"address": "ad_system", "private_key": "adsystem_private", "public_key": "adsystem_public", "balance": 0},
-            {"address": "admin_wallet", "private_key": "admin_private", "public_key": "admin_public", "balance": 0}
+            {"address": "admin_wallet", "private_key": "admin_private", "public_key": "admin_public", "balance": 10000}
         ]
         
         for wallet in system_wallets:
@@ -233,7 +240,8 @@ class Blockchain:
                 "public_key": public_key,
                 "balance": 0,
                 "last_mining_claim": None,
-                "total_mined": 0
+                "total_mined": 0,
+                "mining_active": False
             }
             supabase.table('wallets').insert(wallet_data).execute()
             print(f"✅ Created wallet: {address}")
@@ -301,9 +309,7 @@ class Blockchain:
                     'address': address,
                     'private_key': f'auto_{address[:10]}',
                     'public_key': f'auto_{address[:10]}',
-                    'balance': amount if amount > 0 else 0,
-                    'last_mining_claim': None,
-                    'total_mined': 0
+                    'balance': amount if amount > 0 else 0
                 }).execute()
         except Exception as e:
             print(f"⚠️ Error updating balance for {address}: {e}")
@@ -329,11 +335,14 @@ class Blockchain:
             if wallet.get('mining_active', False):
                 return {"error": "Already mining"}
             
+            # Use UTC timezone
+            now = datetime.now(timezone.utc)
+            
             # Start mining session
             supabase.table('wallets').update({
                 'mining_active': True,
-                'mining_started': datetime.utcnow().isoformat(),
-                'mining_last_claim': datetime.utcnow().isoformat(),
+                'mining_started': now.isoformat(),
+                'mining_last_claim': now.isoformat(),
                 'mining_accumulated': 0
             }).eq('address', address).execute()
             
@@ -364,9 +373,12 @@ class Blockchain:
             if not wallet.get('mining_active', False):
                 return {"error": "Not mining"}
             
-            # Calculate mining rewards
+            # Parse time with UTC
             mining_started = datetime.fromisoformat(wallet['mining_started'])
-            now = datetime.utcnow()
+            if mining_started.tzinfo is None:
+                mining_started = mining_started.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
             mining_duration = (now - mining_started).total_seconds()
             
             # Calculate reward (capped at daily limit)
@@ -407,7 +419,8 @@ class Blockchain:
                 "address": address,
                 "reward": reward,
                 "duration": f"{mining_duration/3600:.2f} hours",
-                "total_mined": total_mined
+                "total_mined": total_mined,
+                "new_balance": current_balance + reward
             }
         except Exception as e:
             return {"error": str(e)}
@@ -433,9 +446,12 @@ class Blockchain:
                     "daily_cap": self.daily_cap
                 }
             
-            # Calculate current rewards
+            # Parse with UTC
             mining_started = datetime.fromisoformat(wallet['mining_started'])
-            now = datetime.utcnow()
+            if mining_started.tzinfo is None:
+                mining_started = mining_started.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
             mining_duration = (now - mining_started).total_seconds()
             
             # Calculate reward so far
@@ -470,9 +486,12 @@ class Blockchain:
             if not wallet.get('mining_active', False):
                 return {"error": "Not mining"}
             
-            # Check if 24 hours passed
+            # Parse with UTC
             last_claim = datetime.fromisoformat(wallet.get('mining_last_claim', wallet['mining_started']))
-            now = datetime.utcnow()
+            if last_claim.tzinfo is None:
+                last_claim = last_claim.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
             
             if (now - last_claim).total_seconds() < self.mining_seconds:
                 remaining = self.mining_seconds - (now - last_claim).total_seconds()
@@ -484,6 +503,9 @@ class Blockchain:
             
             # Calculate reward
             mining_started = datetime.fromisoformat(wallet['mining_started'])
+            if mining_started.tzinfo is None:
+                mining_started = mining_started.replace(tzinfo=timezone.utc)
+            
             mining_duration = (now - mining_started).total_seconds()
             reward = (mining_duration / 3600) * self.hourly_rate
             reward = min(reward, self.daily_cap)
@@ -667,4 +689,7 @@ except Exception as e:
     print(f"❌ Error initializing blockchain: {e}")
     blockchain = None
 
+# ============================================
+# EXPORT FOR IMPORT
+# ============================================
 __all__ = ['blockchain', 'TOKEN_SYMBOL', 'TOKEN_NAME', 'supabase']
