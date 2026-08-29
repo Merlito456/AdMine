@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 
@@ -79,11 +79,23 @@ st.markdown("""
     .admin-action-danger {
         border-left-color: #f5576c;
     }
-    .config-input {
-        background: #0f0f1a;
-        padding: 10px;
-        border-radius: 8px;
-        margin: 5px 0;
+    .mining-active {
+        background: #00d2ff22;
+        border: 1px solid #00d2ff;
+        padding: 10px 15px;
+        border-radius: 10px;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+    .mining-inactive {
+        background: #1a1a2e;
+        padding: 10px 15px;
+        border-radius: 10px;
+        border: 1px solid #2d2d44;
     }
     .footer {
         text-align: center;
@@ -92,11 +104,6 @@ st.markdown("""
         font-size: 12px;
         border-top: 1px solid #2d2d44;
         margin-top: 40px;
-    }
-    .supply-display {
-        font-size: 24px;
-        font-weight: bold;
-        color: #00d2ff;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -109,16 +116,14 @@ ADMIN_CREDENTIALS = {
     "merlito": "merlito456"
 }
 
-# Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'username' not in st.session_state:
     st.session_state.username = None
-if 'config_changed' not in st.session_state:
-    st.session_state.config_changed = False
+if 'mining_address' not in st.session_state:
+    st.session_state.mining_address = None
 
 def check_auth():
-    """Check if user is authenticated"""
     if not st.session_state.authenticated:
         st.markdown("""
         <div style="max-width: 400px; margin: 100px auto; padding: 40px; background: #1a1a2e; border-radius: 15px; border: 1px solid #2d2d44;">
@@ -151,7 +156,6 @@ check_auth()
 # ============================================
 @st.cache_data(ttl=5)
 def api_request(endpoint, method='GET', data=None):
-    """Make API request with caching"""
     try:
         url = f"{API_URL}{endpoint}"
         if method == 'GET':
@@ -168,7 +172,6 @@ def api_request(endpoint, method='GET', data=None):
         return None, str(e)
 
 def refresh_data():
-    """Force refresh cached data"""
     st.cache_data.clear()
     st.rerun()
 
@@ -202,8 +205,8 @@ st.markdown(f"""
 # ============================================
 backend_data, backend_error = api_request('/api/token-info')
 chain_data, chain_error = api_request('/api/blockchain')
+mining_rate, _ = api_request('/api/mining/rate')
 
-# Status bar
 col_status1, col_status2, col_status3, col_status4, col_status5 = st.columns(5)
 
 with col_status1:
@@ -227,9 +230,9 @@ with col_status3:
         st.warning("⚠️ Unknown")
 
 with col_status4:
-    if backend_data:
-        reward = backend_data.get('mining_reward', 10)
-        st.info(f"⛏️ Reward: {reward} {TOKEN_SYMBOL}")
+    if mining_rate:
+        rate = mining_rate.get('hourly_rate', 0.5)
+        st.info(f"⛏️ Rate: {rate} {TOKEN_SYMBOL}/hr")
     else:
         st.warning("⚠️ Unknown")
 
@@ -242,12 +245,13 @@ st.markdown("---")
 # ============================================
 # ADMIN DASHBOARD - TABS
 # ============================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Dashboard",
-    "⛏️ Mining Controls",
+    "⛏️ Mining",
     "🪙 Token Supply",
     "⚙️ Configurations",
-    "📝 Transactions"
+    "📝 Transactions",
+    "👛 Wallets"
 ])
 
 # ============================================
@@ -258,7 +262,6 @@ with tab1:
     
     with col1:
         st.subheader("📊 System Statistics")
-        
         stats_data, _ = api_request('/api/stats')
         
         if stats_data:
@@ -277,15 +280,17 @@ with tab1:
             </div>
             <div class="stat-card">
                 <div class="stat-label">🪙 Total Supply</div>
-                <div class="stat-number">{stats_data.get('total_supply', 0):.2f}</div>
+                <div class="stat-number">{stats_data.get('total_supply', 0):.4f}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">⏱️ Mining Rate</div>
+                <div class="stat-number">{stats_data.get('hourly_mining_rate', 0.5)} {TOKEN_SYMBOL}/hr</div>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.warning("⚠️ Stats unavailable")
         
         st.markdown("---")
-        
-        # Top Wallets
         st.subheader("🏆 Top Wallets")
         wallets_data, _ = api_request('/api/wallets/top?limit=10')
         if wallets_data:
@@ -299,7 +304,7 @@ with tab1:
                     <div style="background: #1a1a2e; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; border: 1px solid #2d2d44;">
                         <span style="font-size: 14px;">
                             {medal} {addr} 
-                            <span style="float: right; color: #00d2ff;">{balance:.2f} {TOKEN_SYMBOL}</span>
+                            <span style="float: right; color: #00d2ff;">{balance:.4f} {TOKEN_SYMBOL}</span>
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
@@ -316,7 +321,10 @@ with tab1:
             
             st.metric("📏 Block Height", len(chain))
             st.metric("🎯 Difficulty", chain_data.get('difficulty', 4))
-            st.metric("⛏️ Mining Reward", f"{chain_data.get('mining_reward', 10)} {TOKEN_SYMBOL}")
+            
+            if mining_rate:
+                st.metric("⛏️ Hourly Rate", f"{mining_rate.get('hourly_rate', 0.5)} {TOKEN_SYMBOL}/hr")
+                st.metric("📊 Daily Cap", f"{mining_rate.get('daily_cap', 12)} {TOKEN_SYMBOL}/day")
             
             st.markdown("### 📦 Latest Blocks")
             if chain:
@@ -358,9 +366,13 @@ with tab1:
                     <span style="color: #8899aa;">Decimals</span>
                     <span style="color: white;">{backend_data.get('decimals', 18)}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; padding: 5px 0;">
+                <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
                     <span style="color: #8899aa;">Total Supply</span>
                     <span style="color: #f093fb;">{backend_data.get('total_supply', 0):,}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 5px 0;">
+                    <span style="color: #8899aa;">Max Supply</span>
+                    <span style="color: #f5576c;">{backend_data.get('max_supply', 100000000):,}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -371,7 +383,8 @@ with tab1:
         health_checks = {
             "Backend API": backend_data is not None,
             "Blockchain": chain_data is not None,
-            "Supabase": backend_data is not None
+            "Supabase": backend_data is not None,
+            "Mining System": mining_rate is not None
         }
         for component, status in health_checks.items():
             if status:
@@ -380,67 +393,136 @@ with tab1:
                 st.error(f"❌ {component}")
 
 # ============================================
-# TAB 2: MINING CONTROLS
+# TAB 2: MINING
 # ============================================
 with tab2:
-    st.subheader("⛏️ Mining Controls")
+    st.subheader("⛏️ Mining Management")
     
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns([1.2, 1])
     
     with col1:
         st.markdown("""
         <div class="admin-action admin-action-success">
-            <strong>⛏️ Force Mine</strong>
-            <p style="color: #8899aa; font-size: 12px;">Manually mine all pending transactions</p>
+            <strong>⛏️ Time-Based Mining</strong>
+            <p style="color: #8899aa; font-size: 12px;">Earn {TOKEN_SYMBOL} by mining continuously</p>
         </div>
-        """, unsafe_allow_html=True)
+        """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        if st.button("⛏️ Force Mine Now", use_container_width=True, type="primary"):
-            with st.spinner("⛏️ Mining..."):
-                data, error = api_request('/api/mine', 'POST', {"address": "admin_wallet"})
-                if data and not error:
-                    st.success(f"✅ {data.get('message', 'Block mined!')}")
-                    refresh_data()
+        # Mining rate display
+        if mining_rate:
+            st.info(f"""
+            **Current Mining Rate:** {mining_rate.get('hourly_rate', 0.5)} {TOKEN_SYMBOL}/hour  
+            **Daily Cap:** {mining_rate.get('daily_cap', 12)} {TOKEN_SYMBOL}/day  
+            **Claim Interval:** {mining_rate.get('claim_interval_hours', 24)} hours
+            """)
+        
+        # Wallet address input
+        mining_address = st.text_input("Wallet Address for Mining", placeholder="Enter wallet address...")
+        
+        if not mining_address and st.session_state.mining_address:
+            mining_address = st.session_state.mining_address
+        
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        
+        with col_btn1:
+            if st.button("▶️ Start Mining", use_container_width=True, type="primary"):
+                if not mining_address:
+                    st.error("❌ Please enter a wallet address")
                 else:
-                    st.error(f"❌ {error}")
+                    with st.spinner("Starting mining..."):
+                        data, error = api_request('/api/mining/start', 'POST', {"address": mining_address})
+                        if data and not error:
+                            st.session_state.mining_address = mining_address
+                            st.success(f"✅ {data.get('message', 'Mining started!')}")
+                            refresh_data()
+                        else:
+                            st.error(f"❌ {error}")
+        
+        with col_btn2:
+            if st.button("⏹️ Stop Mining", use_container_width=True):
+                if not mining_address:
+                    st.error("❌ Please enter a wallet address")
+                else:
+                    with st.spinner("Stopping mining..."):
+                        data, error = api_request('/api/mining/stop', 'POST', {"address": mining_address})
+                        if data and not error:
+                            st.success(f"✅ {data.get('message', 'Mining stopped!')}")
+                            if data.get('reward'):
+                                st.balloons()
+                                st.info(f"💰 Earned: {data.get('reward'):.6f} {TOKEN_SYMBOL}")
+                            refresh_data()
+                        else:
+                            st.error(f"❌ {error}")
+        
+        with col_btn3:
+            if st.button("🔄 Check Status", use_container_width=True):
+                if not mining_address:
+                    st.error("❌ Please enter a wallet address")
+                else:
+                    with st.spinner("Checking..."):
+                        data, error = api_request(f'/api/mining/status/{mining_address}')
+                        if data and not error:
+                            st.session_state.mining_address = mining_address
+                            if data.get('status') == 'active':
+                                st.success("🟢 Mining is ACTIVE")
+                                st.info(f"""
+                                **Duration:** {data.get('duration', '0.00 hours')}  
+                                **Reward So Far:** {data.get('reward_so_far', '0')}  
+                                **Hourly Rate:** {data.get('hourly_rate', 'N/A')}  
+                                **Daily Cap:** {data.get('daily_cap', 'N/A')}
+                                """)
+                            else:
+                                st.warning("🔴 Mining is INACTIVE")
+                                st.info(f"Hourly Rate: {data.get('rate', 0.5)} {TOKEN_SYMBOL}/hour")
+                        else:
+                            st.error(f"❌ {error}")
         
         st.markdown("---")
         
-        st.markdown("""
-        <div class="admin-action admin-action-warning">
-            <strong>🎯 Set Mining Difficulty</strong>
-            <p style="color: #8899aa; font-size: 12px;">Higher difficulty = harder to mine</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        current_diff = chain_data.get('difficulty', 4) if chain_data else 4
-        new_diff = st.number_input("Difficulty Level", min_value=1, max_value=10, value=current_diff)
-        
-        if st.button("Update Difficulty", use_container_width=True):
-            with st.spinner("Updating..."):
-                data, error = api_request('/api/config/difficulty', 'POST', {"difficulty": new_diff})
-                if data and not error:
-                    st.success(f"✅ Difficulty updated to {new_diff}")
-                    refresh_data()
-                else:
-                    st.error(f"❌ {error}")
+        # Mining Stats
+        if mining_address:
+            st.subheader("📊 Mining Statistics")
+            stats_data, _ = api_request(f'/api/mining/stats/{mining_address}')
+            if stats_data and not stats_data.get('error'):
+                st.markdown(f"""
+                <div style="background: #1a1a2e; padding: 15px; border-radius: 12px; border: 1px solid #2d2d44;">
+                    <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
+                        <span style="color: #8899aa;">Total Mined</span>
+                        <span style="color: #00d2ff;">{stats_data.get('total_mined', 0):.6f} {TOKEN_SYMBOL}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d2d44;">
+                        <span style="color: #8899aa;">Current Balance</span>
+                        <span style="color: #f093fb;">{stats_data.get('balance', 0):.6f} {TOKEN_SYMBOL}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 5px 0;">
+                        <span style="color: #8899aa;">Status</span>
+                        <span style="color: {'#00d2ff' if stats_data.get('mining_active') else '#f5576c'};">
+                            {'🟢 Active' if stats_data.get('mining_active') else '🔴 Inactive'}
+                        </span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.caption("No mining data available for this address")
     
     with col2:
+        st.subheader("⚙️ Mining Configuration (Admin)")
+        
         st.markdown("""
-        <div class="admin-action admin-action-success">
-            <strong>💎 Set Block Reward</strong>
-            <p style="color: #8899aa; font-size: 12px;">Amount of {TOKEN_SYMBOL} rewarded per block</p>
+        <div class="admin-action admin-action-warning">
+            <strong>📊 Update Mining Rate</strong>
+            <p style="color: #8899aa; font-size: 12px;">Set hourly mining rate in {TOKEN_SYMBOL}</p>
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        current_reward = chain_data.get('mining_reward', 10) if chain_data else 10
-        new_reward = st.number_input(f"Block Reward ({TOKEN_SYMBOL})", min_value=0.1, max_value=100.0, value=float(current_reward), step=0.5)
+        current_rate = mining_rate.get('hourly_rate', 0.5) if mining_rate else 0.5
+        new_rate = st.number_input("Hourly Rate (ADT/hour)", min_value=0.01, max_value=100.0, value=float(current_rate), step=0.1)
         
-        if st.button("Update Block Reward", use_container_width=True):
+        if st.button("Update Mining Rate", use_container_width=True):
             with st.spinner("Updating..."):
-                data, error = api_request('/api/config/reward', 'POST', {"reward": new_reward})
+                data, error = api_request('/api/mining/config', 'POST', {"hourly_rate": new_rate})
                 if data and not error:
-                    st.success(f"✅ Block reward updated to {new_reward} {TOKEN_SYMBOL}")
+                    st.success(f"✅ Mining rate updated to {new_rate} {TOKEN_SYMBOL}/hour")
                     refresh_data()
                 else:
                     st.error(f"❌ {error}")
@@ -449,19 +531,40 @@ with tab2:
         
         st.markdown("""
         <div class="admin-action admin-action-warning">
-            <strong>📺 Set Ad Reward</strong>
-            <p style="color: #8899aa; font-size: 12px;">Amount of {TOKEN_SYMBOL} per ad view</p>
+            <strong>📊 Update Daily Cap</strong>
+            <p style="color: #8899aa; font-size: 12px;">Maximum {TOKEN_SYMBOL} per day</p>
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        current_ad = chain_data.get('ad_reward', 0.5) if chain_data else 0.5
-        new_ad = st.number_input(f"Ad Reward ({TOKEN_SYMBOL})", min_value=0.01, max_value=10.0, value=float(current_ad), step=0.1)
+        current_cap = mining_rate.get('daily_cap', 12) if mining_rate else 12
+        new_cap = st.number_input("Daily Cap (ADT)", min_value=0.1, max_value=1000.0, value=float(current_cap), step=0.5)
         
-        if st.button("Update Ad Reward", use_container_width=True):
+        if st.button("Update Daily Cap", use_container_width=True):
             with st.spinner("Updating..."):
-                data, error = api_request('/api/config/ad-reward', 'POST', {"ad_reward": new_ad})
+                data, error = api_request('/api/mining/config', 'POST', {"daily_cap": new_cap})
                 if data and not error:
-                    st.success(f"✅ Ad reward updated to {new_ad} {TOKEN_SYMBOL}")
+                    st.success(f"✅ Daily cap updated to {new_cap} {TOKEN_SYMBOL}/day")
+                    refresh_data()
+                else:
+                    st.error(f"❌ {error}")
+        
+        st.markdown("---")
+        
+        st.markdown("""
+        <div class="admin-action admin-action-warning">
+            <strong>📊 Update Claim Interval</strong>
+            <p style="color: #8899aa; font-size: 12px;">Hours between reward claims</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        current_interval = mining_rate.get('claim_interval_hours', 24) if mining_rate else 24
+        new_interval = st.number_input("Claim Interval (hours)", min_value=1, max_value=168, value=int(current_interval))
+        
+        if st.button("Update Claim Interval", use_container_width=True):
+            with st.spinner("Updating..."):
+                data, error = api_request('/api/mining/config', 'POST', {"claim_interval_hours": new_interval})
+                if data and not error:
+                    st.success(f"✅ Claim interval updated to {new_interval} hours")
                     refresh_data()
                 else:
                     st.error(f"❌ {error}")
@@ -534,11 +637,14 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
         
+        stats_data, _ = api_request('/api/stats')
         if stats_data:
-            st.metric("Total Supply", f"{stats_data.get('total_supply', 0):.2f} {TOKEN_SYMBOL}")
+            st.metric("Total Supply", f"{stats_data.get('total_supply', 0):.4f} {TOKEN_SYMBOL}")
+            st.metric("Circulating Supply", f"{stats_data.get('circulating_supply', 0):.4f} {TOKEN_SYMBOL}")
             st.metric("Total Wallets", stats_data.get('total_wallets', 0))
             st.metric("Total Transactions", stats_data.get('total_transactions', 0))
-            st.metric("Max Supply", f"{backend_data.get('total_supply', 100000000):,} {TOKEN_SYMBOL}" if backend_data else "Unknown")
+            st.metric("Max Supply", f"{stats_data.get('max_supply', 100000000):,} {TOKEN_SYMBOL}")
+            st.metric("Mining Rate", f"{stats_data.get('hourly_mining_rate', 0.5)} {TOKEN_SYMBOL}/hr")
         
         st.markdown("---")
         
@@ -608,23 +714,6 @@ with tab4:
     with col2:
         st.markdown("""
         <div class="admin-action admin-action-success">
-            <strong>🔑 Set Admin Wallet</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        admin_wallet = st.text_input("Admin Wallet Address", placeholder="0x...")
-        
-        if st.button("Set Admin Wallet", use_container_width=True):
-            with st.spinner("Updating..."):
-                data, error = api_request('/api/config/admin-wallet', 'POST', {"address": admin_wallet})
-                if data and not error:
-                    st.success("✅ Admin wallet updated")
-                    refresh_data()
-                else:
-                    st.error(f"❌ {error}")
-        
-        st.markdown("""
-        <div class="admin-action admin-action-warning">
             <strong>📊 Export Blockchain Data</strong>
         </div>
         """, unsafe_allow_html=True)
@@ -702,11 +791,69 @@ with tab5:
                     st.error(f"❌ {error}")
 
 # ============================================
+# TAB 6: WALLETS
+# ============================================
+with tab6:
+    st.subheader("👛 Wallet Management")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div class="admin-action admin-action-success">
+            <strong>🆕 Create New Wallet</strong>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("🪙 Create Wallet", use_container_width=True, type="primary"):
+            with st.spinner("Creating wallet..."):
+                data, error = api_request('/api/wallet/create', 'POST')
+                if data and not error:
+                    st.success("✅ Wallet created successfully!")
+                    st.info(f"""
+                    **Address:** `{data.get('address')}`  
+                    **Private Key:** `{data.get('private_key')}`  
+                    **Balance:** 0 {TOKEN_SYMBOL}
+                    """)
+                    refresh_data()
+                else:
+                    st.error(f"❌ {error}")
+    
+    with col2:
+        st.markdown("""
+        <div class="admin-action admin-action-warning">
+            <strong>🔍 Lookup Wallet</strong>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        lookup_address = st.text_input("Enter Wallet Address", placeholder="0x...")
+        
+        if lookup_address and st.button("🔍 Lookup", use_container_width=True):
+            with st.spinner("Looking up..."):
+                balance_data, _ = api_request(f'/api/balance/{lookup_address}')
+                stats_data, _ = api_request(f'/api/mining/stats/{lookup_address}')
+                
+                if balance_data:
+                    st.success("✅ Wallet found!")
+                    st.info(f"""
+                    **Address:** `{lookup_address}`  
+                    **Balance:** {balance_data.get('balance', 0):.6f} {TOKEN_SYMBOL}
+                    """)
+                    
+                    if stats_data and not stats_data.get('error'):
+                        st.info(f"""
+                        **Total Mined:** {stats_data.get('total_mined', 0):.6f} {TOKEN_SYMBOL}  
+                        **Mining Active:** {'🟢 Yes' if stats_data.get('mining_active') else '🔴 No'}
+                        """)
+                else:
+                    st.warning("⚠️ Wallet not found")
+
+# ============================================
 # FOOTER
 # ============================================
 st.markdown(f"""
 <div class="footer">
-    <p>⚙️ <b>AdMine Admin</b> · {TOKEN_SYMBOL} Blockchain Monitor</p>
+    <p>⚙️ <b>{APP_NAME}</b> · {TOKEN_SYMBOL} Blockchain Monitor</p>
     <p style="font-size: 11px; color: #445566;">
         API: {API_URL} · {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     </p>
