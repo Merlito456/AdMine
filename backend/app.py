@@ -2,6 +2,13 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from blockchain_with_supabase import blockchain, TOKEN_SYMBOL, TOKEN_NAME
 from supabase_client import supabase_client
+from auth import (
+    auth_register, auth_login, auth_logout, 
+    require_auth, get_current_user, get_user_profile,
+    bind_wallet_to_user, create_wallet_for_user,
+    get_user_wallet, auth_check, verify_session,
+    generate_jwt
+)
 import time
 import os
 import uuid
@@ -482,6 +489,101 @@ def reset_blockchain():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ============================================
+# AUTHENTICATION ROUTES
+# ============================================
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """Register a new user"""
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    username = data.get('username')
+    
+    if not email or not password:
+        return jsonify({'error': 'Email and password required'}), 400
+    
+    result, status = auth_register(email, password, username)
+    return jsonify(result), status
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """Login user"""
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return jsonify({'error': 'Email and password required'}), 400
+    
+    result, status = auth_login(email, password)
+    return jsonify(result), status
+
+@app.route('/api/auth/logout', methods=['POST'])
+@require_auth
+def logout():
+    """Logout user"""
+    result, status = auth_logout()
+    return jsonify(result), status
+
+@app.route('/api/auth/check', methods=['GET'])
+def check_auth():
+    """Check authentication status"""
+    result, status = auth_check()
+    return jsonify(result), status
+
+@app.route('/api/auth/profile', methods=['GET'])
+@require_auth
+def profile():
+    """Get user profile"""
+    user = get_current_user()
+    result, status = get_user_profile(user['user_id'])
+    return jsonify(result), status
+
+@app.route('/api/auth/wallet/create', methods=['POST'])
+@require_auth
+def create_user_wallet():
+    """Create a wallet for the current user"""
+    user = get_current_user()
+    result, status = create_wallet_for_user(user['user_id'])
+    return jsonify(result), status
+
+@app.route('/api/auth/wallet/bind', methods=['POST'])
+@require_auth
+def bind_wallet():
+    """Bind an existing wallet to the current user"""
+    user = get_current_user()
+    data = request.json
+    
+    address = data.get('address')
+    private_key = data.get('private_key')
+    public_key = data.get('public_key')
+    
+    if not address or not private_key or not public_key:
+        return jsonify({'error': 'Wallet details required'}), 400
+    
+    result, status = bind_wallet_to_user(user['user_id'], address, private_key, public_key)
+    return jsonify(result), status
+
+@app.route('/api/auth/wallet', methods=['GET'])
+@require_auth
+def get_wallet():
+    """Get user's wallet"""
+    user = get_current_user()
+    result, status = get_user_wallet(user['user_id'])
+    if status == 200:
+        return jsonify({'status': 'success', 'wallet': result}), 200
+    return jsonify({'error': result.get('error', 'Wallet not found')}), status
+
+@app.route('/api/auth/refresh', methods=['POST'])
+@require_auth
+def refresh_token():
+    """Refresh JWT token"""
+    user = get_current_user()
+    token = generate_jwt(user['user_id'], user['email'])
+    return jsonify({'token': token}), 200
 
 # ============================================
 # ANDROID APP SPECIFIC ENDPOINTS
