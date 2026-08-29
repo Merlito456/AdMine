@@ -6,6 +6,7 @@ from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 # ============================================
@@ -15,7 +16,12 @@ SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://mydbvqyxoxqzluslpavh.supabase.
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'sb_publishable_7An_A_PQbrrTzpyrSKOEgw_dPf5mj_o')
 
 # Initialize Supabase
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print(f"✅ Supabase connected to {SUPABASE_URL}")
+except Exception as e:
+    print(f"❌ Supabase connection error: {e}")
+    supabase = None
 
 # ============================================
 # TOKEN CONFIG
@@ -66,9 +72,9 @@ class Block:
 
 class Blockchain:
     def __init__(self):
-        self.difficulty = 4
-        self.mining_reward = 10
-        self.ad_reward = 0.5
+        self.difficulty = int(os.getenv('DIFFICULTY', 4))
+        self.mining_reward = float(os.getenv('MINING_REWARD', 10))
+        self.ad_reward = float(os.getenv('AD_REWARD', 0.5))
         self.chain = []
         self.pending_transactions = []
         
@@ -77,6 +83,11 @@ class Blockchain:
     
     def load_from_db(self):
         """Load blockchain from Supabase"""
+        if not supabase:
+            print("⚠️ Supabase not connected, creating fresh blockchain")
+            self.create_genesis_block()
+            return
+        
         try:
             # Get all blocks
             response = supabase.table('blocks').select('*').order('index', desc=False).execute()
@@ -115,15 +126,19 @@ class Blockchain:
         self.chain.append(genesis_block)
         
         # Save to Supabase
-        self.save_block_to_db(genesis_block)
+        if supabase:
+            self.save_block_to_db(genesis_block)
         
         # Create system wallets
         self.create_system_wallets()
         
-        print("✅ Genesis block created!")
+        print(f"✅ Genesis block created! Hash: {genesis_block.hash}")
     
     def create_system_wallets(self):
         """Create system wallets in Supabase"""
+        if not supabase:
+            return
+            
         system_wallets = [
             {"address": "system", "private_key": "system_private", "public_key": "system_public", "balance": 0},
             {"address": "ad_system", "private_key": "adsystem_private", "public_key": "adsystem_public", "balance": 0},
@@ -135,10 +150,31 @@ class Blockchain:
                 supabase.table('wallets').insert(wallet).execute()
                 print(f"✅ Created wallet: {wallet['address']}")
             except Exception as e:
-                print(f"⚠️ Wallet {wallet['address']} already exists")
+                # Wallet might already exist
+                pass
+    
+    def create_wallet(self, address, private_key, public_key):
+        """Create a new wallet"""
+        if not supabase:
+            return
+        
+        try:
+            wallet_data = {
+                "address": address,
+                "private_key": private_key,
+                "public_key": public_key,
+                "balance": 0
+            }
+            supabase.table('wallets').insert(wallet_data).execute()
+            print(f"✅ Created wallet: {address}")
+        except Exception as e:
+            print(f"⚠️ Error creating wallet: {e}")
     
     def save_block_to_db(self, block):
         """Save block to Supabase"""
+        if not supabase:
+            return False
+            
         try:
             block_dict = block.to_dict()
             # Convert timestamp to datetime string
@@ -156,6 +192,9 @@ class Blockchain:
         self.pending_transactions.append(transaction)
         
         # Save to Supabase
+        if not supabase:
+            return
+            
         try:
             tx_hash = self.generate_tx_hash(transaction)
             tx_data = {
@@ -181,7 +220,6 @@ class Blockchain:
     def mine_pending_transactions(self, mining_reward_address):
         """Mine pending transactions"""
         if not self.pending_transactions:
-            print("No pending transactions to mine")
             return None
         
         # Add mining reward
@@ -208,15 +246,16 @@ class Blockchain:
         self.chain.append(block)
         
         # Save to Supabase
-        self.save_block_to_db(block)
-        
-        # Update pending transactions with block index
-        for tx in self.pending_transactions:
-            try:
-                tx_hash = self.generate_tx_hash(tx)
-                supabase.table('transactions').update({'block_index': block.index}).eq('tx_hash', tx_hash).execute()
-            except Exception as e:
-                print(f"⚠️ Error updating transaction: {e}")
+        if supabase:
+            self.save_block_to_db(block)
+            
+            # Update pending transactions with block index
+            for tx in self.pending_transactions:
+                try:
+                    tx_hash = self.generate_tx_hash(tx)
+                    supabase.table('transactions').update({'block_index': block.index}).eq('tx_hash', tx_hash).execute()
+                except Exception as e:
+                    print(f"⚠️ Error updating transaction: {e}")
         
         # Update wallet balances
         for tx in self.pending_transactions:
@@ -230,6 +269,9 @@ class Blockchain:
     
     def update_wallet_balance(self, address, amount):
         """Update wallet balance in Supabase"""
+        if not supabase:
+            return
+            
         try:
             # Get current balance
             response = supabase.table('wallets').select('balance').eq('address', address).execute()
@@ -250,6 +292,9 @@ class Blockchain:
     
     def get_balance(self, address):
         """Get wallet balance from Supabase"""
+        if not supabase:
+            return 0
+            
         try:
             response = supabase.table('wallets').select('balance').eq('address', address).execute()
             if response.data:
@@ -260,27 +305,37 @@ class Blockchain:
     
     def get_blockchain_stats(self):
         """Get blockchain statistics"""
+        stats = {
+            'total_blocks': len(self.chain),
+            'total_transactions': 0,
+            'total_wallets': 0,
+            'total_supply': 0
+        }
+        
+        if not supabase:
+            return stats
+            
         try:
-            blocks_count = len(self.chain)
             txs_count = supabase.table('transactions').select('count', count='exact').execute()
             wallets_count = supabase.table('wallets').select('count', count='exact').execute()
             
-            return {
-                'total_blocks': blocks_count,
-                'total_transactions': txs_count.count,
-                'total_wallets': wallets_count.count,
-                'total_supply': sum([w.balance for w in self.get_all_wallets()])
-            }
+            stats['total_transactions'] = txs_count.count
+            stats['total_wallets'] = wallets_count.count
+            
+            # Calculate total supply
+            wallets = supabase.table('wallets').select('balance').execute()
+            stats['total_supply'] = sum([w['balance'] for w in wallets.data])
+            
         except Exception:
-            return {
-                'total_blocks': len(self.chain),
-                'total_transactions': 0,
-                'total_wallets': 0,
-                'total_supply': 0
-            }
+            pass
+            
+        return stats
     
     def get_all_wallets(self, limit=100):
         """Get all wallets"""
+        if not supabase:
+            return []
+            
         try:
             response = supabase.table('wallets').select('*').limit(limit).order('balance', desc=True).execute()
             return response.data
@@ -297,7 +352,8 @@ class Blockchain:
             "total_supply": TOTAL_SUPPLY,
             "circulating_supply": stats['total_supply'],
             "mining_reward": self.mining_reward,
-            "ad_reward": self.ad_reward
+            "ad_reward": self.ad_reward,
+            "difficulty": self.difficulty
         }
     
     def to_dict(self):
@@ -328,3 +384,4 @@ class Blockchain:
 
 # Create singleton
 blockchain = Blockchain()
+print(f"✅ Blockchain initialized with {len(blockchain.chain)} blocks")
