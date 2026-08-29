@@ -134,8 +134,8 @@ def check_auth():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            username = st.text_input("👤 Username", placeholder="admin")
-            password = st.text_input("🔑 Password", type="password", placeholder="••••••••")
+            username = st.text_input("👤 Username", placeholder="admin", key="login_username")
+            password = st.text_input("🔑 Password", type="password", placeholder="••••••••", key="login_password")
             
             if st.button("🔓 Login", use_container_width=True, type="primary"):
                 if username in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[username] == password:
@@ -416,7 +416,7 @@ with tab2:
             **Claim Interval:** {mining_rate.get('claim_interval_hours', 24)} hours
             """)
         
-        mining_address = st.text_input("Wallet Address for Mining", placeholder="Enter wallet address...")
+        mining_address = st.text_input("Wallet Address for Mining", placeholder="Enter wallet address...", key="mining_address_input")
         
         if not mining_address and st.session_state.mining_address:
             mining_address = st.session_state.mining_address
@@ -514,7 +514,7 @@ with tab2:
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
         current_rate = mining_rate.get('hourly_rate', 0.5) if mining_rate else 0.5
-        new_rate = st.number_input("Hourly Rate (ADT/hour)", min_value=0.01, max_value=100.0, value=float(current_rate), step=0.1)
+        new_rate = st.number_input("Hourly Rate (ADT/hour)", min_value=0.01, max_value=100.0, value=float(current_rate), step=0.1, key="mining_rate_input")
         
         if st.button("Update Mining Rate", use_container_width=True):
             with st.spinner("Updating..."):
@@ -535,7 +535,7 @@ with tab2:
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
         current_cap = mining_rate.get('daily_cap', 12) if mining_rate else 12
-        new_cap = st.number_input("Daily Cap (ADT)", min_value=0.1, max_value=1000.0, value=float(current_cap), step=0.5)
+        new_cap = st.number_input("Daily Cap (ADT)", min_value=0.1, max_value=1000.0, value=float(current_cap), step=0.5, key="daily_cap_input")
         
         if st.button("Update Daily Cap", use_container_width=True):
             with st.spinner("Updating..."):
@@ -556,7 +556,7 @@ with tab2:
         """, unsafe_allow_html=True)
         
         current_interval = mining_rate.get('claim_interval_hours', 24) if mining_rate else 24
-        new_interval = st.number_input("Claim Interval (hours)", min_value=1, max_value=168, value=int(current_interval))
+        new_interval = st.number_input("Claim Interval (hours)", min_value=1, max_value=168, value=int(current_interval), key="claim_interval_input")
         
         if st.button("Update Claim Interval", use_container_width=True):
             with st.spinner("Updating..."):
@@ -583,8 +583,8 @@ with tab3:
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        mint_amount = st.number_input(f"Amount to Mint ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=100.0, step=10.0)
-        mint_address = st.text_input("Destination Wallet Address", placeholder="0x...")
+        mint_amount = st.number_input(f"Amount to Mint ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=100.0, step=10.0, key="mint_amount_input")
+        mint_address = st.text_input("Destination Wallet Address", placeholder="0x...", key="mint_address_input")
         
         if st.button("🪙 Mint Tokens", use_container_width=True, type="primary"):
             if not mint_address:
@@ -610,8 +610,8 @@ with tab3:
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        burn_amount = st.number_input(f"Amount to Burn ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=50.0, step=10.0)
-        burn_address = st.text_input("Wallet Address to Burn From", placeholder="0x...")
+        burn_amount = st.number_input(f"Amount to Burn ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=50.0, step=10.0, key="burn_amount_input")
+        burn_address = st.text_input("Wallet Address to Burn From", placeholder="0x...", key="burn_address_input")
         
         if st.button("🔥 Burn Tokens", use_container_width=True):
             if not burn_address:
@@ -679,7 +679,6 @@ with tab4:
             st.metric("Total Ad Views", ad_stats.get('total_ad_views', 0))
             st.metric("Total Ad Rewards", f"{ad_stats.get('total_ad_rewards', 0):.2f} {TOKEN_SYMBOL}")
         
-        # Ad type breakdown (simplified)
         with col2:
             st.subheader("📊 Ad Statistics")
             st.caption(f"Total views: {ad_stats.get('total_ad_views', 0)}")
@@ -688,7 +687,7 @@ with tab4:
     # User stats lookup
     st.markdown("---")
     st.subheader("🔍 Lookup User Stats")
-    user_address = st.text_input("Enter Wallet Address", placeholder="0x...")
+    user_address = st.text_input("Wallet Address to Lookup", placeholder="0x...", key="user_lookup_input")
     
     if user_address and st.button("📊 Get User Stats", use_container_width=True):
         with st.spinner("Loading user data..."):
@@ -751,7 +750,7 @@ with tab5:
         """, unsafe_allow_html=True)
         
         current_name = backend_data.get('name', 'AdToken') if backend_data else 'AdToken'
-        new_name = st.text_input("Token Name", value=current_name)
+        new_name = st.text_input("Token Name", value=current_name, key="token_name_input")
         
         if st.button("Update Token Name", use_container_width=True):
             with st.spinner("Updating..."):
@@ -769,7 +768,7 @@ with tab5:
         """, unsafe_allow_html=True)
         
         current_symbol = backend_data.get('symbol', TOKEN_SYMBOL) if backend_data else TOKEN_SYMBOL
-        new_symbol = st.text_input("Token Symbol", value=current_symbol, max_chars=5)
+        new_symbol = st.text_input("Token Symbol", value=current_symbol, max_chars=5, key="token_symbol_input")
         
         if st.button("Update Token Symbol", use_container_width=True):
             with st.spinner("Updating..."):
@@ -816,9 +815,9 @@ with tab6:
         </div>
         """.replace('{TOKEN_SYMBOL}', TOKEN_SYMBOL), unsafe_allow_html=True)
         
-        send_to = st.text_input("Recipient Address", placeholder="0x...")
-        send_amount = st.number_input(f"Amount ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=10.0)
-        send_note = st.text_input("Note (optional)")
+        send_to = st.text_input("Recipient Address", placeholder="0x...", key="send_to_input")
+        send_amount = st.number_input(f"Amount ({TOKEN_SYMBOL})", min_value=0.01, max_value=1000000.0, value=10.0, key="send_amount_input")
+        send_note = st.text_input("Note (optional)", key="send_note_input")
         
         if st.button("💸 Send Tokens", use_container_width=True, type="primary"):
             if not send_to:
@@ -843,9 +842,9 @@ with tab6:
         </div>
         """, unsafe_allow_html=True)
         
-        search_address = st.text_input("Search by Wallet Address", placeholder="0x...")
+        search_address = st.text_input("Search by Wallet Address", placeholder="0x...", key="search_address_input")
         
-        if search_address and st.button("🔍 Search", use_container_width=True):
+        if search_address and st.button("🔍 Search Transactions", use_container_width=True):
             with st.spinner("Searching..."):
                 data, error = api_request(f'/api/wallet/{search_address}/transactions')
                 if data and not error:
@@ -895,9 +894,9 @@ with tab7:
         </div>
         """, unsafe_allow_html=True)
         
-        lookup_address = st.text_input("Enter Wallet Address", placeholder="0x...")
+        lookup_address = st.text_input("Wallet Address to Lookup", placeholder="0x...", key="lookup_address_input")
         
-        if lookup_address and st.button("🔍 Lookup", use_container_width=True):
+        if lookup_address and st.button("🔍 Lookup Wallet", use_container_width=True):
             with st.spinner("Looking up..."):
                 balance_data, _ = api_request(f'/api/balance/{lookup_address}')
                 stats_data, _ = api_request(f'/api/mining/stats/{lookup_address}')
