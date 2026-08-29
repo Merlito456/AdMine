@@ -4,6 +4,7 @@ import time
 import os
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+from supabase_client import supabase_client
 
 load_dotenv()
 
@@ -13,39 +14,25 @@ load_dotenv()
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://mydbvqyxoxqzluslpavh.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'sb_publishable_7An_A_PQbrrTzpyrSKOEgw_dPf5mj_o')
 
-# Initialize Supabase
-try:
-    from supabase import create_client, Client
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print(f"✅ Supabase connected to {SUPABASE_URL}")
-except Exception as e:
-    print(f"❌ Supabase connection error: {e}")
-    supabase = None
+# ============================================
+# TOKEN CONFIG - 10 TRILLION
+# ============================================
+TOKEN_SYMBOL = os.getenv('TOKEN_SYMBOL', 'ADT')
+TOKEN_NAME = os.getenv('TOKEN_NAME', 'Ad Token')
+TOKEN_DECIMALS = int(os.getenv('TOKEN_DECIMALS', 18))
+TOTAL_SUPPLY = int(os.getenv('TOTAL_SUPPLY', 10_000_000_000_000))
+MAX_SUPPLY = int(os.getenv('MAX_SUPPLY', 10_000_000_000_000))
+GENESIS_SUPPLY = int(os.getenv('GENESIS_SUPPLY', 1_000_000_000_000))
 
 # ============================================
-# TOKEN CONFIG
+# MINING CONFIG
 # ============================================
-TOKEN_SYMBOL = "ADT"
-TOKEN_NAME = "Ad Token"
-TOKEN_DECIMALS = 18
+MINING_REWARD = float(os.getenv('MINING_REWARD', 10))
+AD_REWARD = float(os.getenv('AD_REWARD', 0.5))
+DIFFICULTY = int(os.getenv('DIFFICULTY', 4))
 
 # ============================================
-# SUPPLY CONFIG - 10 TRILLION
-# ============================================
-MAX_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
-TOTAL_SUPPLY = 10_000_000_000_000  # 10 Trillion ADT
-
-# ============================================
-# MINING CONFIG (Adjusted for 10T supply)
-# ============================================
-MINING_CONFIG = {
-    'hourly_rate': 0.5,      # 0.5 ADT per hour (can adjust higher)
-    'daily_cap': 12.0,       # 12 ADT per day
-    'claim_interval_hours': 24,
-    'mining_seconds': 86400,
-
-# ============================================
-# BLOCK CLASS (Simplified - Only for ledger)
+# BLOCK CLASS
 # ============================================
 class Block:
     def __init__(self, index, transactions, timestamp, previous_hash, nonce=0):
@@ -84,491 +71,343 @@ class Block:
         }
 
 # ============================================
-# BLOCKCHAIN CLASS (Time-Based Mining)
+# BLOCKCHAIN CLASS
 # ============================================
 class Blockchain:
     def __init__(self):
-        self.difficulty = int(os.getenv('DIFFICULTY', 4))
+        self.difficulty = DIFFICULTY
+        self.mining_reward = MINING_REWARD
+        self.ad_reward = AD_REWARD
+        self.token_symbol = TOKEN_SYMBOL
+        self.token_name = TOKEN_NAME
+        self.total_supply = TOTAL_SUPPLY
+        self.max_supply = MAX_SUPPLY
+        self.genesis_supply = GENESIS_SUPPLY
+        self.circulating_supply = 0
         
         # Time-based mining settings
-        self.hourly_rate = float(os.getenv('MINING_RATE', MINING_CONFIG['hourly_rate']))
-        self.daily_cap = float(os.getenv('DAILY_CAP', MINING_CONFIG['daily_cap']))
-        self.claim_interval_hours = int(os.getenv('CLAIM_INTERVAL', MINING_CONFIG['claim_interval_hours']))
+        self.hourly_rate = float(os.getenv('MINING_RATE', 0.5))
+        self.daily_cap = float(os.getenv('DAILY_CAP', 12.0))
+        self.claim_interval_hours = int(os.getenv('CLAIM_INTERVAL', 24))
         self.mining_seconds = self.claim_interval_hours * 3600
-        
-        # Supply tracking
-        self.total_supply = 0
-        self.circulating_supply = 0
-        self.burned_supply = 0
-        self.minted_supply = 0
-        self.genesis_supply = 0
-        self.max_supply = MAX_SUPPLY
         
         self.chain = []
         self.pending_transactions = []
         
-        # Load from Supabase
+        # Load from Supabase or create genesis
         self.load_from_db()
-    
+
     def load_from_db(self):
         """Load blockchain from Supabase"""
-        if not supabase:
-            print("⚠️ Supabase not connected, creating fresh blockchain")
-            self.create_genesis_block()
-            return
-        
-        try:
-            # Get all blocks
-            response = supabase.table('blocks').select('*').order('index', desc=False).execute()
-            blocks = response.data if hasattr(response, 'data') else []
+        blocks = supabase_client.get_all_blocks(limit=1000)
+        if blocks:
+            blocks.sort(key=lambda x: x['index'])
+            for block_data in blocks:
+                block = Block(
+                    index=block_data['index'],
+                    transactions=json.loads(block_data['transactions']),
+                    timestamp=datetime.fromisoformat(block_data['timestamp'].replace('Z', '+00:00')).timestamp(),
+                    previous_hash=block_data['previous_hash'],
+                    nonce=block_data['nonce']
+                )
+                block.hash = block_data['hash']
+                self.chain.append(block)
             
-            if blocks:
-                for block_data in blocks:
-                    block = Block(
-                        index=block_data['index'],
-                        transactions=json.loads(block_data['transactions']) if isinstance(block_data['transactions'], str) else block_data['transactions'],
-                        timestamp=block_data['timestamp'],
-                        previous_hash=block_data['previous_hash'],
-                        nonce=block_data['nonce']
-                    )
-                    block.hash = block_data['hash']
-                    self.chain.append(block)
-                
-                # Load pending transactions
-                pending_resp = supabase.table('transactions').select('*').is_('block_index', 'null').execute()
-                pending = pending_resp.data if hasattr(pending_resp, 'data') else []
-                self.pending_transactions = [json.loads(tx['data']) if isinstance(tx['data'], str) else tx['data'] for tx in pending]
-                
-                # Load mining sessions
-                self.load_mining_sessions()
-                
-                print(f"✅ Loaded {len(self.chain)} blocks from Supabase")
-            else:
-                self.create_genesis_block()
-                
-        except Exception as e:
-            print(f"⚠️ Error loading from Supabase: {e}")
+            pending = supabase_client.get_pending_transactions()
+            self.pending_transactions = [json.loads(tx['data']) for tx in pending]
+            
+            print(f"✅ Loaded {len(self.chain)} blocks from database")
+        else:
             self.create_genesis_block()
-    
-    def load_mining_sessions(self):
-        """Load mining sessions from Supabase"""
-        if not supabase:
-            return
-        
-        try:
-            # Create mining_sessions table if needed
-            self.create_mining_tables()
-        except Exception as e:
-            print(f"⚠️ Error loading mining sessions: {e}")
-    
-    def create_mining_tables(self):
-        """Create mining tables if they don't exist"""
-        if not supabase:
-            return
-        
-        try:
-            # Check if mining_sessions table exists
-            supabase.table('mining_sessions').select('*').limit(1).execute()
-        except:
-            # Table will be created via SQL
-            print("📊 Mining tables need to be created via SQL")
-    
+
     def create_genesis_block(self):
-        """Create and save genesis block"""
-        print("🚀 Creating genesis block...")
+        """Create and save genesis block with 1 Trillion ADT"""
+        print("🚀 Creating genesis block with 1 Trillion ADT...")
         
-        # Set initial supply
-        self.genesis_supply = 10000
-        self.total_supply = self.genesis_supply
-        self.circulating_supply = self.genesis_supply
+        self.genesis_supply = GENESIS_SUPPLY
+        self.total_supply = GENESIS_SUPPLY
+        self.circulating_supply = GENESIS_SUPPLY
         
-        # Create genesis transactions
-        genesis_transactions = [
-            {
-                "from": "system",
-                "to": "admin_wallet",
-                "amount": self.genesis_supply,
-                "type": "genesis",
-                "token": TOKEN_SYMBOL,
-                "timestamp": time.time()
-            }
-        ]
+        genesis_transactions = [{
+            "from": "system",
+            "to": "admin_wallet",
+            "amount": self.genesis_supply,
+            "type": "genesis",
+            "token": TOKEN_SYMBOL,
+            "timestamp": time.time()
+        }]
         
         genesis_block = Block(0, genesis_transactions, time.time(), "0")
         genesis_block.mine_block(self.difficulty)
         self.chain.append(genesis_block)
         
-        # Save to Supabase
-        if supabase:
-            self.save_block_to_db(genesis_block)
-            self.update_wallet_balance("admin_wallet", self.genesis_supply)
+        supabase_client.save_block(genesis_block.to_dict())
         
-        # Create system wallets
+        supabase_client.create_wallet("admin_wallet", "admin_private_key", "admin_public_key")
+        supabase_client.update_balance("admin_wallet", self.genesis_supply)
+        
         self.create_system_wallets()
         
-        print(f"✅ Genesis block created! Total Supply: {self.total_supply} {TOKEN_SYMBOL}")
-    
+        print(f"✅ Genesis block created!")
+        print(f"🪙 Initial Supply: {self.genesis_supply:,} {TOKEN_SYMBOL}")
+        print(f"📊 Max Supply: {self.max_supply:,} {TOKEN_SYMBOL}")
+
     def create_system_wallets(self):
-        """Create system wallets in Supabase"""
-        if not supabase:
-            return
-            
+        """Create system wallets"""
         system_wallets = [
             {"address": "system", "private_key": "system_private", "public_key": "system_public", "balance": 0},
             {"address": "ad_system", "private_key": "adsystem_private", "public_key": "adsystem_public", "balance": 0},
-            {"address": "admin_wallet", "private_key": "admin_private", "public_key": "admin_public", "balance": 10000}
+            {"address": "admin_wallet", "private_key": "admin_private", "public_key": "admin_public", "balance": self.genesis_supply}
         ]
         
         for wallet in system_wallets:
-            try:
-                response = supabase.table('wallets').select('*').eq('address', wallet['address']).execute()
-                if not response.data:
-                    supabase.table('wallets').insert(wallet).execute()
-                    print(f"✅ Created wallet: {wallet['address']}")
-            except Exception as e:
-                pass
-    
+            existing = supabase_client.get_wallet(wallet['address'])
+            if not existing:
+                supabase_client.create_wallet(wallet['address'], wallet['private_key'], wallet['public_key'])
+                if wallet['balance'] > 0:
+                    supabase_client.update_balance(wallet['address'], wallet['balance'])
+                print(f"✅ Created wallet: {wallet['address']}")
+
     def create_wallet(self, address, private_key, public_key):
         """Create a new wallet"""
-        if not supabase:
-            return
-        
-        try:
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if response.data:
-                return
-            
-            wallet_data = {
-                "address": address,
-                "private_key": private_key,
-                "public_key": public_key,
-                "balance": 0,
-                "last_mining_claim": None,
-                "total_mined": 0,
-                "mining_active": False
-            }
-            supabase.table('wallets').insert(wallet_data).execute()
-            print(f"✅ Created wallet: {address}")
-        except Exception as e:
-            print(f"⚠️ Error creating wallet: {e}")
-    
-    def save_block_to_db(self, block):
-        """Save block to Supabase"""
-        if not supabase:
-            return False
-            
-        try:
-            block_dict = block.to_dict()
-            block_dict['timestamp'] = datetime.fromtimestamp(block_dict['timestamp']).isoformat()
-            block_dict['transactions'] = json.dumps(block_dict['transactions'])
-            
-            supabase.table('blocks').insert(block_dict).execute()
-            return True
-        except Exception as e:
-            print(f"❌ Error saving block: {e}")
-            return False
-    
+        supabase_client.create_wallet(address, private_key, public_key)
+
+    def get_latest_block(self):
+        return self.chain[-1]
+
     def add_transaction(self, transaction):
-        """Add transaction to pending and Supabase"""
         self.pending_transactions.append(transaction)
-        
-        if not supabase:
-            return
-            
-        try:
-            tx_hash = self.generate_tx_hash(transaction)
-            tx_data = {
-                'tx_hash': tx_hash,
-                'from_address': transaction.get('from', 'system'),
-                'to_address': transaction.get('to', 'system'),
-                'amount': transaction.get('amount', 0),
-                'token': TOKEN_SYMBOL,
-                'type': transaction.get('type', 'transfer'),
-                'block_index': None,
-                'timestamp': datetime.fromtimestamp(transaction.get('timestamp', time.time())).isoformat(),
-                'data': json.dumps(transaction)
-            }
-            supabase.table('transactions').insert(tx_data).execute()
-        except Exception as e:
-            print(f"⚠️ Error saving transaction: {e}")
-    
-    def generate_tx_hash(self, transaction):
-        """Generate transaction hash"""
-        tx_string = f"{transaction.get('from', '')}{transaction.get('to', '')}{transaction.get('amount', 0)}{transaction.get('timestamp', time.time())}"
-        return hashlib.sha256(tx_string.encode()).hexdigest()[:16]
-    
+        tx_data = transaction.copy()
+        tx_data['block_index'] = None
+        supabase_client.save_transaction(tx_data)
+
     def update_wallet_balance(self, address, amount):
-        """Update wallet balance in Supabase"""
-        if not supabase:
-            return
-            
-        try:
-            response = supabase.table('wallets').select('balance').eq('address', address).execute()
-            if response.data:
-                current_balance = response.data[0]['balance']
-                new_balance = current_balance + amount
-                supabase.table('wallets').update({'balance': new_balance}).eq('address', address).execute()
-            else:
-                supabase.table('wallets').insert({
-                    'address': address,
-                    'private_key': f'auto_{address[:10]}',
-                    'public_key': f'auto_{address[:10]}',
-                    'balance': amount if amount > 0 else 0
-                }).execute()
-        except Exception as e:
-            print(f"⚠️ Error updating balance for {address}: {e}")
-    
+        """Update wallet balance"""
+        supabase_client.update_balance(address, amount)
+
+    def mine_pending_transactions(self, mining_reward_address):
+        if not self.pending_transactions:
+            return None
+        
+        if self.total_supply + self.mining_reward > self.max_supply:
+            print(f"⚠️ Cannot mine: Would exceed max supply of {self.max_supply:,}")
+            return None
+        
+        reward_tx = {
+            "from": "system",
+            "to": mining_reward_address,
+            "amount": self.mining_reward,
+            "type": "mining_reward",
+            "token": TOKEN_SYMBOL,
+            "timestamp": time.time()
+        }
+        self.pending_transactions.append(reward_tx)
+        
+        self.total_supply += self.mining_reward
+        self.circulating_supply += self.mining_reward
+
+        block = Block(
+            index=len(self.chain),
+            transactions=self.pending_transactions,
+            timestamp=time.time(),
+            previous_hash=self.get_latest_block().hash
+        )
+
+        block.mine_block(self.difficulty)
+        self.chain.append(block)
+        
+        block_dict = block.to_dict()
+        supabase_client.save_block(block_dict)
+        
+        for tx in self.pending_transactions:
+            tx['block_index'] = block.index
+            supabase_client.save_transaction(tx)
+        
+        for tx in self.pending_transactions:
+            if tx.get('to'):
+                wallet = supabase_client.get_wallet(tx['to'])
+                if wallet:
+                    supabase_client.update_balance(tx['to'], wallet['balance'] + tx['amount'])
+            if tx.get('from') not in ['system', 'ad_system']:
+                wallet = supabase_client.get_wallet(tx['from'])
+                if wallet:
+                    supabase_client.update_balance(tx['from'], wallet['balance'] - tx['amount'])
+        
+        self.pending_transactions = []
+        return block
+
+    def get_balance(self, address):
+        return supabase_client.get_wallet(address)['balance'] if supabase_client.get_wallet(address) else 0
+
+    def get_all_wallets(self, limit=100):
+        return supabase_client.get_all_wallets(limit)
+
+    def get_blockchain_stats(self):
+        stats = supabase_client.get_blockchain_stats()
+        stats['total_supply'] = self.total_supply
+        stats['max_supply'] = self.max_supply
+        stats['genesis_supply'] = self.genesis_supply
+        stats['circulating_supply'] = self.circulating_supply
+        stats['hourly_mining_rate'] = self.hourly_rate
+        stats['daily_mining_cap'] = self.daily_cap
+        return stats
+
+    def get_token_info(self):
+        stats = self.get_blockchain_stats()
+        return {
+            "name": TOKEN_NAME,
+            "symbol": TOKEN_SYMBOL,
+            "decimals": TOKEN_DECIMALS,
+            "total_supply": self.total_supply,
+            "max_supply": self.max_supply,
+            "genesis_supply": self.genesis_supply,
+            "circulating_supply": stats['circulating_supply'],
+            "mining_reward": self.mining_reward,
+            "ad_reward": self.ad_reward,
+            "difficulty": self.difficulty
+        }
+
+    def to_dict(self):
+        return {
+            "chain": [block.to_dict() for block in self.chain],
+            "pending_transactions": self.pending_transactions,
+            "difficulty": self.difficulty,
+            "mining_reward": self.mining_reward,
+            "ad_reward": self.ad_reward,
+            "token_info": self.get_token_info()
+        }
+
+    def validate_chain(self):
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i-1]
+            if current.hash != current.calculate_hash():
+                return False
+            if current.previous_hash != previous.hash:
+                return False
+            if current.hash[:self.difficulty] != "0" * self.difficulty:
+                return False
+        return True
+
     # ============================================
     # TIME-BASED MINING METHODS
     # ============================================
-    
+
     def start_mining(self, address):
-        """Start a mining session for a wallet"""
-        if not supabase:
-            return {"error": "Database not connected"}
+        """Start mining for a wallet"""
+        wallet = supabase_client.get_wallet(address)
+        if not wallet:
+            return {"error": "Wallet not found"}
         
-        try:
-            # Check if wallet exists
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if not response.data:
-                return {"error": "Wallet not found"}
-            
-            wallet = response.data[0]
-            
-            # Check if already mining
-            if wallet.get('mining_active', False):
-                return {"error": "Already mining"}
-            
-            # Use UTC timezone
-            now = datetime.now(timezone.utc)
-            
-            # Start mining session
-            supabase.table('wallets').update({
-                'mining_active': True,
-                'mining_started': now.isoformat(),
-                'mining_last_claim': now.isoformat(),
-                'mining_accumulated': 0
-            }).eq('address', address).execute()
-            
+        if wallet.get('mining_active', False):
+            return {"error": "Already mining"}
+        
+        now = datetime.now(timezone.utc)
+        supabase_client.update_mining_status(address, True, now.isoformat())
+        
+        return {
+            "status": "success",
+            "message": "Mining started!",
+            "address": address,
+            "rate": self.hourly_rate,
+            "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
+            "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day"
+        }
+
+    def stop_mining(self, address):
+        """Stop mining and claim rewards"""
+        wallet = supabase_client.get_wallet(address)
+        if not wallet:
+            return {"error": "Wallet not found"}
+        
+        if not wallet.get('mining_active', False):
+            return {"error": "Not mining"}
+        
+        mining_started = datetime.fromisoformat(wallet['mining_started'])
+        if mining_started.tzinfo is None:
+            mining_started = mining_started.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
+        mining_duration = (now - mining_started).total_seconds()
+        reward = (mining_duration / 3600) * self.hourly_rate
+        reward = min(reward, self.daily_cap)
+        
+        current_balance = wallet.get('balance', 0)
+        total_mined = wallet.get('total_mined', 0) + reward
+        
+        supabase_client.update_mining_status(address, False, None, current_balance + reward, total_mined)
+        
+        self.total_supply += reward
+        self.circulating_supply += reward
+        
+        transaction = {
+            "from": "mining_system",
+            "to": address,
+            "amount": reward,
+            "type": "mining_reward",
+            "token": TOKEN_SYMBOL,
+            "timestamp": time.time()
+        }
+        self.add_transaction(transaction)
+        
+        return {
+            "status": "success",
+            "message": f"Mining stopped! Earned {reward:.4f} {TOKEN_SYMBOL}",
+            "address": address,
+            "reward": reward,
+            "duration": f"{mining_duration/3600:.2f} hours",
+            "new_balance": current_balance + reward
+        }
+
+    def get_mining_status(self, address):
+        """Get mining status"""
+        wallet = supabase_client.get_wallet(address)
+        if not wallet:
+            return {"error": "Wallet not found"}
+        
+        if not wallet.get('mining_active', False):
             return {
-                "status": "success",
-                "message": "Mining started!",
+                "status": "inactive",
                 "address": address,
                 "rate": self.hourly_rate,
-                "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
-                "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day"
-            }
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def stop_mining(self, address):
-        """Stop mining and calculate rewards"""
-        if not supabase:
-            return {"error": "Database not connected"}
-        
-        try:
-            # Get wallet
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if not response.data:
-                return {"error": "Wallet not found"}
-            
-            wallet = response.data[0]
-            
-            if not wallet.get('mining_active', False):
-                return {"error": "Not mining"}
-            
-            # Parse time with UTC
-            mining_started = datetime.fromisoformat(wallet['mining_started'])
-            if mining_started.tzinfo is None:
-                mining_started = mining_started.replace(tzinfo=timezone.utc)
-            
-            now = datetime.now(timezone.utc)
-            mining_duration = (now - mining_started).total_seconds()
-            
-            # Calculate reward (capped at daily limit)
-            reward = (mining_duration / 3600) * self.hourly_rate
-            reward = min(reward, self.daily_cap)
-            
-            # Update wallet
-            current_balance = wallet.get('balance', 0)
-            total_mined = wallet.get('total_mined', 0) + reward
-            
-            supabase.table('wallets').update({
-                'mining_active': False,
-                'balance': current_balance + reward,
-                'total_mined': total_mined,
-                'mining_accumulated': wallet.get('mining_accumulated', 0) + reward
-            }).eq('address', address).execute()
-            
-            # Update supply
-            self.total_supply += reward
-            self.circulating_supply += reward
-            
-            # Record transaction
-            transaction = {
-                "from": "mining_system",
-                "to": address,
-                "amount": reward,
-                "type": "mining_reward",
-                "token": TOKEN_SYMBOL,
-                "timestamp": time.time(),
-                "duration": mining_duration,
-                "rate": self.hourly_rate
-            }
-            self.add_transaction(transaction)
-            
-            return {
-                "status": "success",
-                "message": f"Mining stopped! Earned {reward:.4f} {TOKEN_SYMBOL}",
-                "address": address,
-                "reward": reward,
-                "duration": f"{mining_duration/3600:.2f} hours",
-                "total_mined": total_mined,
-                "new_balance": current_balance + reward
-            }
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def get_mining_status(self, address):
-        """Get current mining status for a wallet"""
-        if not supabase:
-            return {"error": "Database not connected"}
-        
-        try:
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if not response.data:
-                return {"error": "Wallet not found"}
-            
-            wallet = response.data[0]
-            
-            if not wallet.get('mining_active', False):
-                return {
-                    "status": "inactive",
-                    "address": address,
-                    "message": "Not currently mining",
-                    "rate": self.hourly_rate,
-                    "daily_cap": self.daily_cap
-                }
-            
-            # Parse with UTC
-            mining_started = datetime.fromisoformat(wallet['mining_started'])
-            if mining_started.tzinfo is None:
-                mining_started = mining_started.replace(tzinfo=timezone.utc)
-            
-            now = datetime.now(timezone.utc)
-            mining_duration = (now - mining_started).total_seconds()
-            
-            # Calculate reward so far
-            reward = (mining_duration / 3600) * self.hourly_rate
-            reward = min(reward, self.daily_cap)
-            
-            return {
-                "status": "active",
-                "address": address,
-                "mining_started": wallet['mining_started'],
-                "duration": f"{mining_duration/3600:.2f} hours",
-                "reward_so_far": f"{reward:.4f} {TOKEN_SYMBOL}",
-                "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
-                "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day",
-                "balance": wallet.get('balance', 0)
-            }
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def claim_daily_reward(self, address):
-        """Claim accumulated mining rewards"""
-        if not supabase:
-            return {"error": "Database not connected"}
-        
-        try:
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if not response.data:
-                return {"error": "Wallet not found"}
-            
-            wallet = response.data[0]
-            
-            if not wallet.get('mining_active', False):
-                return {"error": "Not mining"}
-            
-            # Parse with UTC
-            last_claim = datetime.fromisoformat(wallet.get('mining_last_claim', wallet['mining_started']))
-            if last_claim.tzinfo is None:
-                last_claim = last_claim.replace(tzinfo=timezone.utc)
-            
-            now = datetime.now(timezone.utc)
-            
-            if (now - last_claim).total_seconds() < self.mining_seconds:
-                remaining = self.mining_seconds - (now - last_claim).total_seconds()
-                return {
-                    "error": f"Can only claim every {self.claim_interval_hours} hours",
-                    "remaining": f"{remaining/3600:.2f} hours",
-                    "next_claim": (last_claim + timedelta(hours=self.claim_interval_hours)).isoformat()
-                }
-            
-            # Calculate reward
-            mining_started = datetime.fromisoformat(wallet['mining_started'])
-            if mining_started.tzinfo is None:
-                mining_started = mining_started.replace(tzinfo=timezone.utc)
-            
-            mining_duration = (now - mining_started).total_seconds()
-            reward = (mining_duration / 3600) * self.hourly_rate
-            reward = min(reward, self.daily_cap)
-            
-            # Update wallet
-            current_balance = wallet.get('balance', 0)
-            total_mined = wallet.get('total_mined', 0) + reward
-            accumulated = wallet.get('mining_accumulated', 0) + reward
-            
-            supabase.table('wallets').update({
-                'balance': current_balance + reward,
-                'total_mined': total_mined,
-                'mining_accumulated': accumulated,
-                'mining_last_claim': now.isoformat()
-            }).eq('address', address).execute()
-            
-            # Update supply
-            self.total_supply += reward
-            self.circulating_supply += reward
-            
-            return {
-                "status": "success",
-                "message": f"Claimed {reward:.4f} {TOKEN_SYMBOL}",
-                "address": address,
-                "reward": reward,
-                "new_balance": current_balance + reward,
-                "total_mined": total_mined
-            }
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def get_mining_stats(self, address):
-        """Get mining statistics for a wallet"""
-        if not supabase:
-            return {"error": "Database not connected"}
-        
-        try:
-            response = supabase.table('wallets').select('*').eq('address', address).execute()
-            if not response.data:
-                return {"error": "Wallet not found"}
-            
-            wallet = response.data[0]
-            
-            return {
-                "address": address,
-                "total_mined": wallet.get('total_mined', 0),
-                "mining_accumulated": wallet.get('mining_accumulated', 0),
-                "mining_active": wallet.get('mining_active', False),
-                "mining_started": wallet.get('mining_started'),
-                "last_claim": wallet.get('mining_last_claim'),
-                "balance": wallet.get('balance', 0),
-                "hourly_rate": self.hourly_rate,
                 "daily_cap": self.daily_cap
             }
-        except Exception as e:
-            return {"error": str(e)}
-    
+        
+        mining_started = datetime.fromisoformat(wallet['mining_started'])
+        if mining_started.tzinfo is None:
+            mining_started = mining_started.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
+        mining_duration = (now - mining_started).total_seconds()
+        reward = (mining_duration / 3600) * self.hourly_rate
+        reward = min(reward, self.daily_cap)
+        
+        return {
+            "status": "active",
+            "address": address,
+            "duration": f"{mining_duration/3600:.2f} hours",
+            "reward_so_far": f"{reward:.4f} {TOKEN_SYMBOL}",
+            "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
+            "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day"
+        }
+
+    def get_mining_stats(self, address):
+        """Get mining statistics"""
+        wallet = supabase_client.get_wallet(address)
+        if not wallet:
+            return {"error": "Wallet not found"}
+        
+        return {
+            "address": address,
+            "total_mined": wallet.get('total_mined', 0),
+            "balance": wallet.get('balance', 0),
+            "mining_active": wallet.get('mining_active', False),
+            "hourly_rate": self.hourly_rate,
+            "daily_cap": self.daily_cap
+        }
+
     def update_mining_config(self, hourly_rate=None, daily_cap=None, claim_interval=None):
-        """Update mining configuration (Admin only)"""
+        """Update mining configuration"""
         if hourly_rate is not None:
             self.hourly_rate = float(hourly_rate)
         if daily_cap is not None:
@@ -583,103 +422,6 @@ class Blockchain:
             "daily_cap": self.daily_cap,
             "claim_interval_hours": self.claim_interval_hours
         }
-    
-    def get_balance(self, address):
-        """Get wallet balance from Supabase"""
-        if not supabase:
-            return 0
-            
-        try:
-            response = supabase.table('wallets').select('balance').eq('address', address).execute()
-            if response.data:
-                return response.data[0]['balance']
-            return 0
-        except Exception:
-            return 0
-    
-    def get_all_wallets(self, limit=100):
-        """Get all wallets"""
-        if not supabase:
-            return []
-            
-        try:
-            response = supabase.table('wallets').select('*').limit(limit).order('balance', desc=True).execute()
-            return response.data if hasattr(response, 'data') else []
-        except Exception:
-            return []
-    
-    def get_blockchain_stats(self):
-        """Get blockchain statistics"""
-        stats = {
-            'total_blocks': len(self.chain),
-            'total_transactions': 0,
-            'total_wallets': 0,
-            'total_supply': self.total_supply,
-            'circulating_supply': self.circulating_supply,
-            'burned_supply': self.burned_supply,
-            'minted_supply': self.minted_supply,
-            'genesis_supply': self.genesis_supply,
-            'max_supply': self.max_supply,
-            'hourly_mining_rate': self.hourly_rate,
-            'daily_mining_cap': self.daily_cap
-        }
-        
-        if not supabase:
-            return stats
-            
-        try:
-            tx_resp = supabase.table('transactions').select('*', count='exact').execute()
-            stats['total_transactions'] = len(tx_resp.data) if hasattr(tx_resp, 'data') else 0
-            
-            wallet_resp = supabase.table('wallets').select('*', count='exact').execute()
-            stats['total_wallets'] = len(wallet_resp.data) if hasattr(wallet_resp, 'data') else 0
-            
-        except Exception as e:
-            print(f"⚠️ Error getting stats: {e}")
-            
-        return stats
-    
-    def get_token_info(self):
-        """Get token information"""
-        stats = self.get_blockchain_stats()
-        return {
-            "name": TOKEN_NAME,
-            "symbol": TOKEN_SYMBOL,
-            "decimals": TOKEN_DECIMALS,
-            "total_supply": stats['total_supply'],
-            "circulating_supply": stats['circulating_supply'],
-            "burned_supply": stats['burned_supply'],
-            "minted_supply": stats['minted_supply'],
-            "genesis_supply": stats['genesis_supply'],
-            "max_supply": stats['max_supply'],
-            "mining_hourly_rate": self.hourly_rate,
-            "mining_daily_cap": self.daily_cap,
-            "claim_interval_hours": self.claim_interval_hours
-        }
-    
-    def to_dict(self):
-        """Convert blockchain to dictionary"""
-        return {
-            "chain": [block.to_dict() for block in self.chain],
-            "pending_transactions": self.pending_transactions,
-            "difficulty": self.difficulty,
-            "mining_hourly_rate": self.hourly_rate,
-            "mining_daily_cap": self.daily_cap,
-            "token_info": self.get_token_info()
-        }
-    
-    def validate_chain(self):
-        """Validate the blockchain"""
-        for i in range(1, len(self.chain)):
-            current = self.chain[i]
-            previous = self.chain[i-1]
-            
-            if current.hash != current.calculate_hash():
-                return False
-            if current.previous_hash != previous.hash:
-                return False
-        
-        return True
 
 # ============================================
 # CREATE SINGLETON INSTANCE
@@ -687,13 +429,11 @@ class Blockchain:
 try:
     blockchain = Blockchain()
     print(f"✅ Blockchain initialized with {len(blockchain.chain)} blocks")
-    print(f"⛏️ Mining Rate: {blockchain.hourly_rate} {TOKEN_SYMBOL}/hour")
-    print(f"📊 Daily Cap: {blockchain.daily_cap} {TOKEN_SYMBOL}/day")
+    print(f"🪙 Total Supply: {blockchain.total_supply:,} {TOKEN_SYMBOL}")
+    print(f"📊 Max Supply: {blockchain.max_supply:,} {TOKEN_SYMBOL}")
 except Exception as e:
     print(f"❌ Error initializing blockchain: {e}")
     blockchain = None
 
-# ============================================
-# EXPORT FOR IMPORT
-# ============================================
-__all__ = ['blockchain', 'TOKEN_SYMBOL', 'TOKEN_NAME', 'supabase']
+# Export
+__all__ = ['blockchain', 'TOKEN_SYMBOL', 'TOKEN_NAME']
