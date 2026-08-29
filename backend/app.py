@@ -5,6 +5,12 @@ import time
 import os
 import uuid
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+# ============================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================
+load_dotenv()
 
 # ============================================
 # CREATE APP
@@ -325,7 +331,6 @@ def update_token_name():
     if not name:
         return jsonify({"error": "Token name required"}), 400
     
-    # Update in blockchain config
     blockchain.token_name = name
     
     return jsonify({
