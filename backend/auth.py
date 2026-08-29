@@ -4,6 +4,8 @@ import json
 import time
 import hashlib
 import secrets
+import random
+import string
 from datetime import datetime, timezone, timedelta
 from flask import request, jsonify, session
 from functools import wraps
@@ -25,6 +27,30 @@ JWT_EXPIRATION = 3600 * 24 * 7  # 7 days
 
 # Initialize Supabase client with service role
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE or SUPABASE_KEY)
+
+# ============================================
+# HELPER - GENERATE REFERRAL CODE
+# ============================================
+def generate_referral_code():
+    """Generate a unique 8-character referral code"""
+    chars = string.ascii_uppercase + string.digits
+    # Avoid ambiguous characters (0, O, I, 1)
+    chars = chars.replace('0', '').replace('O', '').replace('I', '').replace('1', '')
+    code = ''.join(random.choices(chars, k=8))
+    return code
+
+def get_unique_referral_code():
+    """Generate a unique referral code that doesn't exist in database"""
+    attempts = 0
+    while attempts < 20:
+        code = generate_referral_code()
+        # Check if code exists
+        existing = supabase.table('wallets').select('referral_code').eq('referral_code', code).execute()
+        if not existing.data:
+            return code
+        attempts += 1
+    # Fallback to timestamp-based code
+    return f"AD{int(time.time()) % 1000000:06d}"
 
 # ============================================
 # TOKEN HELPERS
@@ -75,7 +101,7 @@ def require_auth(f):
 # ============================================
 
 def auth_register(email, password, username=None):
-    """Register a new user"""
+    """Register a new user with auto-generated referral code"""
     try:
         # Check if user already exists
         existing = supabase.table('users').select('*').eq('email', email).execute()
@@ -96,11 +122,15 @@ def auth_register(email, password, username=None):
         
         user_id = auth_user.user.id
         
+        # Generate unique referral code
+        referral_code = get_unique_referral_code()
+        
         # Create user profile
         user_data = {
             'id': user_id,
             'email': email,
             'username': username or email.split('@')[0],
+            'referral_code': referral_code,
             'created_at': datetime.now(timezone.utc).isoformat()
         }
         
@@ -115,7 +145,8 @@ def auth_register(email, password, username=None):
             'user': {
                 'id': user_id,
                 'email': email,
-                'username': username or email.split('@')[0]
+                'username': username or email.split('@')[0],
+                'referral_code': referral_code
             },
             'token': token
         }, 201
@@ -152,7 +183,10 @@ def auth_login(email, password):
         token = generate_jwt(user_data['id'], email)
         
         # Get wallet info if exists
-        wallet = supabase.table('wallets').select('*').eq('address', user_data.get('wallet_address', '')).execute() if user_data.get('wallet_address') else None
+        wallet = None
+        if user_data.get('wallet_address'):
+            wallet_result = supabase.table('wallets').select('*').eq('address', user_data['wallet_address']).execute()
+            wallet = wallet_result.data[0] if wallet_result.data else None
         
         return {
             'status': 'success',
@@ -162,17 +196,17 @@ def auth_login(email, password):
                 'email': user_data['email'],
                 'username': user_data.get('username'),
                 'wallet_address': user_data.get('wallet_address'),
+                'referral_code': user_data.get('referral_code'),
                 'balance': user_data.get('balance', 0)
             },
             'token': token,
-            'wallet': wallet.data[0] if wallet and wallet.data else None
+            'wallet': wallet
         }, 200
     except Exception as e:
         return {'error': str(e)}, 500
 
 def auth_logout():
     """Logout user"""
-    # In JWT-based auth, client just discards token
     return {'status': 'success', 'message': 'Logout successful'}, 200
 
 def get_user_profile(user_id):
@@ -188,6 +222,7 @@ def get_user_profile(user_id):
             'email': user['email'],
             'username': user.get('username'),
             'wallet_address': user.get('wallet_address'),
+            'referral_code': user.get('referral_code'),
             'balance': user.get('balance', 0),
             'total_ads_watched': user.get('total_ads_watched', 0),
             'total_ad_rewards': user.get('total_ad_rewards', 0),
@@ -203,29 +238,19 @@ def get_user_profile(user_id):
 def bind_wallet_to_user(user_id, wallet_address, private_key, public_key):
     """Bind a wallet to a user"""
     try:
-        # Check if wallet already bound
+        # Check if wallet already exists
         existing = supabase.table('wallets').select('*').eq('address', wallet_address).execute()
-        if existing.data:
-            # Update user with wallet
-            supabase.table('users').update({
-                'wallet_address': wallet_address,
-                'wallet_private_key': private_key,
-                'wallet_public_key': public_key,
+        if not existing.data:
+            # Create wallet first
+            wallet_data = {
+                'address': wallet_address,
+                'private_key': private_key,
+                'public_key': public_key,
+                'balance': 0,
+                'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
-            }).eq('id', user_id).execute()
-            
-            return {'status': 'success', 'message': 'Wallet bound to user'}, 200
-        
-        # Create wallet first
-        wallet_data = {
-            'address': wallet_address,
-            'private_key': private_key,
-            'public_key': public_key,
-            'balance': 0,
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'updated_at': datetime.now(timezone.utc).isoformat()
-        }
-        supabase.table('wallets').insert(wallet_data).execute()
+            }
+            supabase.table('wallets').insert(wallet_data).execute()
         
         # Update user with wallet
         supabase.table('users').update({
@@ -245,7 +270,7 @@ def bind_wallet_to_user(user_id, wallet_address, private_key, public_key):
         }
         supabase.table('wallet_bindings').insert(binding_data).execute()
         
-        return {'status': 'success', 'message': 'Wallet created and bound to user'}, 201
+        return {'status': 'success', 'message': 'Wallet bound to user'}, 200
     except Exception as e:
         return {'error': str(e)}, 500
 
