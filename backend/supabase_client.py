@@ -487,6 +487,111 @@ class SupabaseClient:
             return []
 
     # ============================================
+    # GAME REWARD OPERATIONS
+    # ============================================
+
+    def update_wallet_stats(self, address, total_games_played=0, total_games_won=0, 
+                            total_game_rewards=0, last_game_played=None):
+        """Update wallet game statistics"""
+        try:
+            # Get current wallet
+            wallet = self.get_wallet(address)
+            if not wallet:
+                return None
+            
+            data = {
+                'total_games_played': wallet.get('total_games_played', 0) + total_games_played,
+                'total_games_won': wallet.get('total_games_won', 0) + total_games_won,
+                'total_game_rewards': wallet.get('total_game_rewards', 0) + total_game_rewards,
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            if last_game_played:
+                data['last_game_played'] = last_game_played
+                
+            return self.update_wallet(address, data)
+        except Exception as e:
+            print(f"❌ Error updating wallet stats: {e}")
+            return None
+
+    def save_game_history(self, game_record):
+        """Save game history record"""
+        try:
+            result = self.client.table('game_history').insert(game_record).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"❌ Error saving game history: {e}")
+            return None
+
+    def get_game_history(self, address, limit=50):
+        """Get game history for a wallet"""
+        try:
+            result = self.client.table('game_history')\
+                .select('*')\
+                .eq('wallet_address', address)\
+                .order('timestamp', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting game history: {e}")
+            return []
+
+    def get_game_stats(self, address):
+        """Get game statistics for a wallet"""
+        try:
+            wallet = self.get_wallet(address)
+            if not wallet:
+                return None
+                
+            # Get game-specific stats
+            games = self.client.table('game_history')\
+                .select('game_name, count, sum(reward_amount)')\
+                .eq('wallet_address', address)\
+                .group_by('game_name')\
+                .execute()
+            
+            return {
+                'total_games_played': wallet.get('total_games_played', 0),
+                'total_games_won': wallet.get('total_games_won', 0),
+                'total_game_rewards': wallet.get('total_game_rewards', 0),
+                'last_game_played': wallet.get('last_game_played'),
+                'games': games.data if hasattr(games, 'data') else [],
+                'balance': wallet.get('balance', 0)
+            }
+        except Exception as e:
+            print(f"❌ Error getting game stats: {e}")
+            return None
+
+    def get_game_leaderboard(self, game_name, limit=20):
+        """Get leaderboard for a specific game"""
+        try:
+            result = self.client.table('game_history')\
+                .select('wallet_address, sum(reward_amount) as total_rewards, count as plays')\
+                .eq('game_name', game_name)\
+                .group_by('wallet_address')\
+                .order('total_rewards', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting game leaderboard: {e}")
+            return []
+
+    def get_game_leaderboard_all(self, limit=20):
+        """Get overall game leaderboard"""
+        try:
+            result = self.client.table('game_history')\
+                .select('wallet_address, sum(reward_amount) as total_rewards, count as total_games')\
+                .group_by('wallet_address')\
+                .order('total_rewards', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting overall leaderboard: {e}")
+            return []
+
+    # ============================================
     # ANALYTICS OPERATIONS
     # ============================================
 
