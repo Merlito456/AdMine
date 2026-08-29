@@ -32,6 +32,190 @@ AD_REWARD = float(os.getenv('AD_REWARD', 0.5))
 DIFFICULTY = int(os.getenv('DIFFICULTY', 4))
 
 # ============================================
+# TIME-BASED MINING METHODS WITH SESSION TRACKING
+# ============================================
+
+def start_mining(self, address):
+    """Start mining for a wallet and record session"""
+    wallet = supabase_client.get_wallet(address)
+    if not wallet:
+        return {"error": "Wallet not found"}
+    
+    if wallet.get('mining_active', False):
+        return {"error": "Already mining"}
+    
+    now = datetime.now(timezone.utc)
+    
+    # Update wallet mining status
+    supabase_client.update_mining_status(address, True, now.isoformat())
+    
+    # Create mining session in database
+    try:
+        session_data = {
+            'wallet_address': address,
+            'start_time': now.isoformat(),
+            'status': 'active',
+            'hourly_rate': self.hourly_rate,
+            'reward_amount': 0,
+            'duration_seconds': 0
+        }
+        supabase_client.create_mining_session(session_data)
+        print(f"✅ Mining session started for {address}")
+        print(f"📊 Session data: {session_data}")
+    except Exception as e:
+        print(f"⚠️ Error creating mining session: {e}")
+    
+    return {
+        "status": "success",
+        "message": "Mining started!",
+        "address": address,
+        "rate": self.hourly_rate,
+        "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
+        "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day",
+        "session_started": now.isoformat()
+    }
+
+def stop_mining(self, address):
+    """Stop mining and claim rewards, update session"""
+    wallet = supabase_client.get_wallet(address)
+    if not wallet:
+        return {"error": "Wallet not found"}
+    
+    if not wallet.get('mining_active', False):
+        return {"error": "Not mining"}
+    
+    mining_started = datetime.fromisoformat(wallet['mining_started'])
+    if mining_started.tzinfo is None:
+        mining_started = mining_started.replace(tzinfo=timezone.utc)
+    
+    now = datetime.now(timezone.utc)
+    mining_duration = (now - mining_started).total_seconds()
+    reward = (mining_duration / 3600) * self.hourly_rate
+    reward = min(reward, self.daily_cap)
+    
+    current_balance = wallet.get('balance', 0)
+    total_mined = wallet.get('total_mined', 0) + reward
+    
+    # Update wallet
+    supabase_client.update_mining_status(address, False, None, current_balance + reward, total_mined)
+    
+    # Update mining session
+    try:
+        # Find active session for this wallet
+        active_session = supabase_client.get_active_mining_session(address)
+        if active_session:
+            supabase_client.update_mining_session(
+                active_session['id'],
+                now.isoformat(),
+                'completed',
+                reward,
+                int(mining_duration)
+            )
+            print(f"✅ Mining session completed for {address}")
+            print(f"📊 Reward: {reward} {TOKEN_SYMBOL}")
+            print(f"📊 Duration: {int(mining_duration)} seconds")
+        else:
+            # If no active session found, create one
+            session_data = {
+                'wallet_address': address,
+                'start_time': mining_started.isoformat(),
+                'end_time': now.isoformat(),
+                'status': 'completed',
+                'hourly_rate': self.hourly_rate,
+                'reward_earned': reward,
+                'duration_seconds': int(mining_duration)
+            }
+            supabase_client.create_mining_session(session_data)
+            print(f"✅ Mining session created for {address}")
+    except Exception as e:
+        print(f"⚠️ Error updating mining session: {e}")
+    
+    self.total_supply += reward
+    self.circulating_supply += reward
+    
+    transaction = {
+        "from": "mining_system",
+        "to": address,
+        "amount": reward,
+        "type": "mining_reward",
+        "token": TOKEN_SYMBOL,
+        "timestamp": time.time()
+    }
+    self.add_transaction(transaction)
+    
+    return {
+        "status": "success",
+        "message": f"Mining stopped! Earned {reward:.4f} {TOKEN_SYMBOL}",
+        "address": address,
+        "reward": reward,
+        "duration": f"{mining_duration/3600:.2f} hours",
+        "new_balance": current_balance + reward,
+        "session_completed": now.isoformat()
+    }
+
+def get_mining_status(self, address):
+    """Get mining status from wallet"""
+    wallet = supabase_client.get_wallet(address)
+    if not wallet:
+        return {"error": "Wallet not found"}
+    
+    # Also check for active session
+    active_session = supabase_client.get_active_mining_session(address)
+    
+    if not wallet.get('mining_active', False):
+        return {
+            "status": "inactive",
+            "address": address,
+            "rate": self.hourly_rate,
+            "daily_cap": self.daily_cap,
+            "has_session": active_session is not None
+        }
+    
+    mining_started = datetime.fromisoformat(wallet['mining_started'])
+    if mining_started.tzinfo is None:
+        mining_started = mining_started.replace(tzinfo=timezone.utc)
+    
+    now = datetime.now(timezone.utc)
+    mining_duration = (now - mining_started).total_seconds()
+    reward = (mining_duration / 3600) * self.hourly_rate
+    reward = min(reward, self.daily_cap)
+    
+    return {
+        "status": "active",
+        "address": address,
+        "duration": f"{mining_duration/3600:.2f} hours",
+        "reward_so_far": f"{reward:.4f} {TOKEN_SYMBOL}",
+        "hourly_rate": f"{self.hourly_rate} {TOKEN_SYMBOL}/hour",
+        "daily_cap": f"{self.daily_cap} {TOKEN_SYMBOL}/day",
+        "session_id": active_session['id'] if active_session else None,
+        "session_started": wallet.get('mining_started')
+    }
+
+def get_mining_stats(self, address):
+    """Get mining statistics"""
+    wallet = supabase_client.get_wallet(address)
+    if not wallet:
+        return {"error": "Wallet not found"}
+    
+    sessions = supabase_client.get_mining_sessions(address)
+    total_earned = sum([s.get('reward_earned', 0) for s in sessions]) if sessions else 0
+    
+    return {
+        "address": address,
+        "total_mined": wallet.get('total_mined', 0),
+        "balance": wallet.get('balance', 0),
+        "mining_active": wallet.get('mining_active', False),
+        "total_sessions": len(sessions),
+        "total_earned": total_earned,
+        "hourly_rate": self.hourly_rate,
+        "daily_cap": self.daily_cap
+    }
+
+def get_mining_sessions(self, address, limit=50):
+    """Get all mining sessions for a wallet"""
+    return supabase_client.get_mining_sessions(address, limit)
+
+# ============================================
 # BLOCK CLASS
 # ============================================
 class Block:
