@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from blockchain_with_supabase import blockchain, TOKEN_SYMBOL, TOKEN_NAME
+from supabase_client import supabase_client
 import time
 import os
 import uuid
@@ -219,6 +220,19 @@ def get_mining_rate():
             "daily_cap": blockchain.daily_cap,
             "claim_interval_hours": blockchain.claim_interval_hours,
             "token": TOKEN_SYMBOL
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mining/sessions/<address>', methods=['GET'])
+def get_mining_sessions(address):
+    """Get mining session history"""
+    try:
+        sessions = supabase_client.get_mining_sessions(address)
+        return jsonify({
+            "address": address,
+            "sessions": sessions,
+            "count": len(sessions)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -592,7 +606,7 @@ def get_ad_stats():
         return jsonify({"error": str(e)}), 500
 
 # --------------------------------
-# USER ANALYTICS
+# USER ANALYTICS (ONLY ONE VERSION)
 # --------------------------------
 
 @app.route('/api/analytics/track', methods=['POST'])
@@ -653,106 +667,48 @@ def get_user_analytics(address):
         return jsonify({"error": str(e)}), 500
 
 # --------------------------------
-# MINING SESSION MANAGEMENT
+# REFERRAL ROUTES
 # --------------------------------
 
-@app.route('/api/mining/session/start', methods=['POST'])
-def start_mining_session():
-    """Start a mining session and track it"""
+@app.route('/api/referral/create', methods=['POST'])
+def create_referral():
     try:
         data = request.json
-        address = data.get('address')
+        referrer = data.get('referrer')
+        referred = data.get('referred')
         
-        if not address:
-            return jsonify({"error": "Wallet address required"}), 400
+        if not referrer or not referred:
+            return jsonify({"error": "Referrer and referred addresses required"}), 400
         
-        from blockchain_with_supabase import supabase
-        
-        result = blockchain.start_mining(address)
-        if result.get('error'):
-            return jsonify(result), 400
-        
-        session = {
-            'wallet_address': address,
-            'start_time': datetime.now(timezone.utc).isoformat(),
-            'status': 'active',
-            'hourly_rate': blockchain.hourly_rate
-        }
-        supabase.table('mining_sessions').insert(session).execute()
-        
-        wallet = supabase.table('wallets').select('total_mining_sessions').eq('address', address).execute()
-        if wallet.data:
-            current = wallet.data[0].get('total_mining_sessions', 0)
-            supabase.table('wallets').update({
-                'total_mining_sessions': current + 1
-            }).eq('address', address).execute()
-        
-        return jsonify({
-            "status": "success",
-            "message": "Mining session started",
-            "address": address,
-            "rate": blockchain.hourly_rate
-        })
+        result = supabase_client.create_referral(referrer, referred)
+        if result:
+            return jsonify({"status": "success", "referral": result})
+        return jsonify({"error": "Failed to create referral"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/mining/session/stop', methods=['POST'])
-def stop_mining_session():
-    """Stop mining session and record rewards"""
+@app.route('/api/referral/complete', methods=['POST'])
+def complete_referral():
     try:
         data = request.json
-        address = data.get('address')
+        referral_id = data.get('referral_id')
+        reward = data.get('reward', 5.0)
         
-        if not address:
-            return jsonify({"error": "Wallet address required"}), 400
+        if not referral_id:
+            return jsonify({"error": "Referral ID required"}), 400
         
-        from blockchain_with_supabase import supabase
-        
-        result = blockchain.stop_mining(address)
-        if result.get('error'):
-            return jsonify(result), 400
-        
-        now = datetime.now(timezone.utc)
-        reward = result.get('reward', 0)
-        duration_str = result.get('duration', '0 hours')
-        try:
-            duration_hours = float(duration_str.split()[0])
-            duration_seconds = int(duration_hours * 3600)
-        except:
-            duration_seconds = 0
-        
-        supabase.table('mining_sessions')\
-            .update({
-                'end_time': now.isoformat(),
-                'status': 'completed',
-                'reward_earned': reward,
-                'duration_seconds': duration_seconds
-            })\
-            .eq('wallet_address', address)\
-            .eq('status', 'active')\
-            .execute()
-        
-        return jsonify(result)
+        result = supabase_client.complete_referral(referral_id, reward)
+        if result:
+            return jsonify({"status": "success", "referral": result})
+        return jsonify({"error": "Failed to complete referral"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/mining/sessions/<address>', methods=['GET'])
-def get_mining_sessions(address):
-    """Get mining session history"""
+@app.route('/api/referrals/<address>', methods=['GET'])
+def get_referrals(address):
     try:
-        from blockchain_with_supabase import supabase
-        response = supabase.table('mining_sessions')\
-            .select('*')\
-            .eq('wallet_address', address)\
-            .order('start_time', desc=True)\
-            .limit(50)\
-            .execute()
-        
-        return jsonify({
-            "address": address,
-            "sessions": response.data,
-            "count": len(response.data)
-        })
+        referrals = supabase_client.get_referrals(address)
+        return jsonify({"address": address, "referrals": referrals, "count": len(referrals)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -806,6 +762,16 @@ def get_user_dashboard(address):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/user/stats/<address>', methods=['GET'])
+def get_user_stats(address):
+    try:
+        stats = supabase_client.get_user_stats(address)
+        if stats:
+            return jsonify(stats)
+        return jsonify({"error": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --------------------------------
 # APP CONFIGURATION
 # --------------------------------
@@ -830,112 +796,6 @@ def get_app_config():
         "version": "1.0.0",
         "api_version": "v1"
     })
-
-# ============================================
-# REFERRAL ROUTES
-# ============================================
-
-@app.route('/api/referral/create', methods=['POST'])
-def create_referral():
-    try:
-        data = request.json
-        referrer = data.get('referrer')
-        referred = data.get('referred')
-        
-        if not referrer or not referred:
-            return jsonify({"error": "Referrer and referred addresses required"}), 400
-        
-        result = supabase_client.create_referral(referrer, referred)
-        if result:
-            return jsonify({"status": "success", "referral": result})
-        return jsonify({"error": "Failed to create referral"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/referral/complete', methods=['POST'])
-def complete_referral():
-    try:
-        data = request.json
-        referral_id = data.get('referral_id')
-        reward = data.get('reward', 5.0)
-        
-        if not referral_id:
-            return jsonify({"error": "Referral ID required"}), 400
-        
-        result = supabase_client.complete_referral(referral_id, reward)
-        if result:
-            return jsonify({"status": "success", "referral": result})
-        return jsonify({"error": "Failed to complete referral"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/referrals/<address>', methods=['GET'])
-def get_referrals(address):
-    try:
-        referrals = supabase_client.get_referrals(address)
-        return jsonify({"address": address, "referrals": referrals, "count": len(referrals)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ============================================
-# ANALYTICS ROUTES
-# ============================================
-
-@app.route('/api/analytics/track', methods=['POST'])
-def track_analytics():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        session_id = data.get('session_id')
-        screen_name = data.get('screen_name')
-        action_type = data.get('action_type')
-        action_data = data.get('action_data', {})
-        
-        if not wallet_address:
-            return jsonify({"error": "Wallet address required"}), 400
-        
-        result = supabase_client.track_analytics(
-            wallet_address, session_id, screen_name, action_type, action_data
-        )
-        if result:
-            return jsonify({"status": "success"})
-        return jsonify({"error": "Failed to track analytics"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/analytics/<address>', methods=['GET'])
-def get_analytics(address):
-    try:
-        analytics = supabase_client.get_user_analytics(address)
-        return jsonify({"address": address, "analytics": analytics, "count": len(analytics)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ============================================
-# USER STATS ROUTE
-# ============================================
-
-@app.route('/api/user/stats/<address>', methods=['GET'])
-def get_user_stats(address):
-    try:
-        stats = supabase_client.get_user_stats(address)
-        if stats:
-            return jsonify(stats)
-        return jsonify({"error": "User not found"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ============================================
-# MINING SESSIONS ROUTE
-# ============================================
-
-@app.route('/api/mining/sessions/<address>', methods=['GET'])
-def get_mining_sessions(address):
-    try:
-        sessions = supabase_client.get_mining_sessions(address)
-        return jsonify({"address": address, "sessions": sessions, "count": len(sessions)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 # ============================================
 # RUN APP
