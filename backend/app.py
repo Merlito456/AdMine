@@ -667,6 +667,130 @@ def get_referral_rewards(address):
         return jsonify({"error": str(e)}), 500
 
 # ============================================
+# GAME REWARD SYSTEM
+# ============================================
+
+@app.route('/api/games/reward', methods=['POST'])
+def claim_game_reward():
+    """Claim reward from a game and update database directly"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        game_name = data.get('game_name')
+        reward_amount = data.get('reward_amount', 0)
+        game_score = data.get('game_score', 0)
+        game_session = data.get('game_session', None)
+        
+        if not wallet_address or not game_name:
+            return jsonify({"error": "Wallet address and game name required"}), 400
+        
+        if reward_amount <= 0:
+            return jsonify({"error": "Reward amount must be greater than 0"}), 400
+        
+        # 1. Check if wallet exists
+        wallet = supabase_client.get_wallet(wallet_address)
+        if not wallet:
+            return jsonify({"error": "Wallet not found"}), 404
+        
+        # 2. Update wallet balance
+        current_balance = wallet.get('balance', 0)
+        new_balance = current_balance + reward_amount
+        supabase_client.update_balance(wallet_address, new_balance)
+        
+        # 3. Update game stats in wallet
+        supabase_client.update_wallet_stats(
+            wallet_address,
+            total_games_played=1,
+            total_games_won=1 if game_score > 0 else 0,
+            total_game_rewards=reward_amount,
+            last_game_played=datetime.now(timezone.utc).isoformat()
+        )
+        
+        # 4. Record game history
+        game_record = {
+            'wallet_address': wallet_address,
+            'game_name': game_name,
+            'reward_amount': reward_amount,
+            'game_score': game_score,
+            'game_session': game_session or str(uuid.uuid4()),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        supabase_client.save_game_history(game_record)
+        
+        # 5. Create blockchain transaction for transparency
+        transaction = {
+            "from": "game_system",
+            "to": wallet_address,
+            "amount": reward_amount,
+            "type": "game_reward",
+            "token": TOKEN_SYMBOL,
+            "timestamp": time.time(),
+            "game_name": game_name,
+            "game_score": game_score
+        }
+        blockchain.add_transaction(transaction)
+        
+        # 6. Update total supply
+        blockchain.total_supply += reward_amount
+        blockchain.circulating_supply += reward_amount
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Earned {reward_amount} {TOKEN_SYMBOL} from {game_name}!",
+            "reward": reward_amount,
+            "token": TOKEN_SYMBOL,
+            "address": wallet_address,
+            "new_balance": new_balance,
+            "game_name": game_name,
+            "game_score": game_score,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/games/history/<address>', methods=['GET'])
+def get_game_history(address):
+    """Get game history for a wallet"""
+    try:
+        history = supabase_client.get_game_history(address, limit=50)
+        return jsonify({
+            "address": address,
+            "history": history,
+            "count": len(history)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/games/stats/<address>', methods=['GET'])
+def get_game_stats(address):
+    """Get game statistics for a wallet"""
+    try:
+        stats = supabase_client.get_game_stats(address)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/games/leaderboard', methods=['GET'])
+def get_game_leaderboard():
+    """Get global game leaderboard"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        game = request.args.get('game', None)
+        
+        if game:
+            leaderboard = supabase_client.get_game_leaderboard(game, limit)
+        else:
+            leaderboard = supabase_client.get_game_leaderboard_all(limit)
+            
+        return jsonify({
+            "leaderboard": leaderboard,
+            "count": len(leaderboard)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
 # ANDROID APP SPECIFIC ENDPOINTS
 # ============================================
 
