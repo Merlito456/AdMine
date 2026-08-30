@@ -255,6 +255,70 @@ def get_mining_sessions(address):
         return jsonify({"error": str(e)}), 500
 
 # ============================================
+# ACTIVE MINERS ENDPOINTS - NEW!
+# ============================================
+
+@app.route('/api/mining/active-count', methods=['GET'])
+def get_active_miners_count():
+    """Get count of currently active mining sessions"""
+    try:
+        from blockchain_with_supabase import supabase
+        
+        # Count active mining sessions
+        response = supabase.table('mining_sessions')\
+            .select('wallet_address', count='exact')\
+            .eq('status', 'active')\
+            .execute()
+        
+        # Count unique active miners
+        active_count = len(response.data) if hasattr(response, 'data') else 0
+        
+        # Also get total active from wallets table
+        wallets_response = supabase.table('wallets')\
+            .select('address', count='exact')\
+            .eq('mining_active', True)\
+            .execute()
+        
+        total_active = len(wallets_response.data) if hasattr(wallets_response, 'data') else 0
+        
+        return jsonify({
+            "active_miners": max(active_count, total_active),
+            "active_sessions": active_count,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mining/active-list', methods=['GET'])
+def get_active_miners_list():
+    """Get list of currently active miners"""
+    try:
+        from blockchain_with_supabase import supabase
+        
+        response = supabase.table('wallets')\
+            .select('address, mining_started, balance')\
+            .eq('mining_active', True)\
+            .order('mining_started', desc=True)\
+            .limit(100)\
+            .execute()
+        
+        active_miners = []
+        for wallet in response.data if hasattr(response, 'data') else []:
+            active_miners.append({
+                "address": wallet.get('address', ''),
+                "mining_started": wallet.get('mining_started'),
+                "balance": wallet.get('balance', 0)
+            })
+        
+        return jsonify({
+            "active_miners": active_miners,
+            "count": len(active_miners),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================
 # DEPRECATED BLOCK MINING (Keep for compatibility)
 # ============================================
 
