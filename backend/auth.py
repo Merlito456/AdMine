@@ -11,7 +11,6 @@ from flask import request, jsonify, session
 from functools import wraps
 from supabase import create_client
 from dotenv import load_dotenv
-import bcrypt
 import jwt
 
 load_dotenv()
@@ -29,8 +28,28 @@ JWT_EXPIRATION = 3600 * 24 * 7  # 7 days
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE or SUPABASE_KEY)
 
 # ============================================
+# PASSWORD HASHING (without bcrypt)
+# ============================================
+
+def hash_password(password):
+    """Hash a password using SHA256 with salt"""
+    salt = secrets.token_hex(16)
+    hashed = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}:{hashed}"
+
+def verify_password(password, hashed_password):
+    """Verify a password against its hash"""
+    try:
+        salt, hash_value = hashed_password.split(':')
+        check_hash = hashlib.sha256((salt + password).encode()).hexdigest()
+        return check_hash == hash_value
+    except:
+        return False
+
+# ============================================
 # HELPER - GENERATE REFERRAL CODE
 # ============================================
+
 def generate_referral_code():
     """Generate a unique 8-character referral code"""
     chars = string.ascii_uppercase + string.digits
@@ -44,7 +63,7 @@ def get_unique_referral_code():
     attempts = 0
     while attempts < 20:
         code = generate_referral_code()
-        # Check if code exists
+        # Check if code exists in wallets table
         existing = supabase.table('wallets').select('referral_code').eq('referral_code', code).execute()
         if not existing.data:
             return code
@@ -103,13 +122,13 @@ def require_auth(f):
 def auth_register(email, password, username=None):
     """Register a new user with auto-generated referral code"""
     try:
-        # Check if user already exists
-        existing = supabase.table('users').select('*').eq('email', email).execute()
+        # Check if user already exists in app_users
+        existing = supabase.table('app_users').select('*').eq('email', email).execute()
         if existing.data:
             return {'error': 'Email already registered'}, 400
         
         # Hash password
-        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        hashed_password = hash_password(password)
         
         # Create user in auth.users
         auth_user = supabase.auth.sign_up({
@@ -125,16 +144,56 @@ def auth_register(email, password, username=None):
         # Generate unique referral code
         referral_code = get_unique_referral_code()
         
-        # Create user profile
+        # Generate wallet
+        private_key = secrets.token_bytes(32).hex()
+        public_key = hashlib.sha256(private_key.encode()).hexdigest()
+        wallet_address = hashlib.sha256(public_key.encode()).hexdigest()[:40]
+        
+        # Create wallet in wallets table
+        wallet_data = {
+            'address': wallet_address,
+            'private_key': private_key,
+            'public_key': public_key,
+            'balance': 0,
+            'referral_code': referral_code,
+            'total_ads_watched': 0,
+            'total_ad_rewards': 0,
+            'total_mining_sessions': 0,
+            'mining_active': False,
+            'mining_accumulated': 0,
+            'total_mined': 0,
+            'total_games_played': 0,
+            'total_games_won': 0,
+            'total_game_rewards': 0,
+            'app_version': '1.0.0',
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Check if wallet already exists (shouldn't, but just in case)
+        existing_wallet = supabase.table('wallets').select('*').eq('address', wallet_address).execute()
+        if not existing_wallet.data:
+            supabase.table('wallets').insert(wallet_data).execute()
+        else:
+            # Update existing wallet
+            supabase.table('wallets').update({
+                'referral_code': referral_code
+            }).eq('address', wallet_address).execute()
+        
+        # Create user in app_users table
         user_data = {
             'id': user_id,
             'email': email,
             'username': username or email.split('@')[0],
+            'wallet_address': wallet_address,
+            'wallet_private_key': private_key,
+            'wallet_public_key': public_key,
             'referral_code': referral_code,
+            'password_hash': hashed_password,
+            'balance': 0,
             'created_at': datetime.now(timezone.utc).isoformat()
         }
-        
-        result = supabase.table('users').insert(user_data).execute()
+        supabase.table('app_users').insert(user_data).execute()
         
         # Generate JWT
         token = generate_jwt(user_id, email)
@@ -146,36 +205,32 @@ def auth_register(email, password, username=None):
                 'id': user_id,
                 'email': email,
                 'username': username or email.split('@')[0],
-                'referral_code': referral_code
+                'wallet_address': wallet_address,
+                'referral_code': referral_code,
+                'balance': 0
             },
             'token': token
         }, 201
     except Exception as e:
+        print(f"❌ Registration error: {e}")
         return {'error': str(e)}, 500
 
 def auth_login(email, password):
     """Login user"""
     try:
-        # Find user
-        user = supabase.table('users').select('*').eq('email', email).execute()
+        # Find user in app_users
+        user = supabase.table('app_users').select('*').eq('email', email).execute()
         if not user.data:
             return {'error': 'Invalid credentials'}, 401
         
         user_data = user.data[0]
         
-        # Verify with Supabase auth
-        try:
-            auth_response = supabase.auth.sign_in_with_password({
-                'email': email,
-                'password': password
-            })
-            if not auth_response.user:
-                return {'error': 'Invalid credentials'}, 401
-        except:
+        # Verify password
+        if not verify_password(password, user_data.get('password_hash', '')):
             return {'error': 'Invalid credentials'}, 401
         
         # Update last login
-        supabase.table('users').update({
+        supabase.table('app_users').update({
             'last_login': datetime.now(timezone.utc).isoformat()
         }).eq('id', user_data['id']).execute()
         
@@ -203,6 +258,7 @@ def auth_login(email, password):
             'wallet': wallet
         }, 200
     except Exception as e:
+        print(f"❌ Login error: {e}")
         return {'error': str(e)}, 500
 
 def auth_logout():
@@ -210,9 +266,9 @@ def auth_logout():
     return {'status': 'success', 'message': 'Logout successful'}, 200
 
 def get_user_profile(user_id):
-    """Get user profile"""
+    """Get user profile from app_users"""
     try:
-        result = supabase.table('users').select('*').eq('id', user_id).execute()
+        result = supabase.table('app_users').select('*').eq('id', user_id).execute()
         if not result.data:
             return {'error': 'User not found'}, 404
         
@@ -253,7 +309,7 @@ def bind_wallet_to_user(user_id, wallet_address, private_key, public_key):
             supabase.table('wallets').insert(wallet_data).execute()
         
         # Update user with wallet
-        supabase.table('users').update({
+        supabase.table('app_users').update({
             'wallet_address': wallet_address,
             'wallet_private_key': private_key,
             'wallet_public_key': public_key,
@@ -291,7 +347,7 @@ def create_wallet_for_user(user_id):
 def get_user_wallet(user_id):
     """Get user's wallet"""
     try:
-        result = supabase.table('users').select('wallet_address, balance').eq('id', user_id).execute()
+        result = supabase.table('app_users').select('wallet_address, balance').eq('id', user_id).execute()
         if not result.data:
             return {'error': 'User not found'}, 404
         
@@ -310,8 +366,8 @@ def verify_session(token):
     if not payload:
         return None
     
-    # Check if user exists
-    result = supabase.table('users').select('*').eq('id', payload['user_id']).execute()
+    # Check if user exists in app_users
+    result = supabase.table('app_users').select('*').eq('id', payload['user_id']).execute()
     if not result.data:
         return None
     
