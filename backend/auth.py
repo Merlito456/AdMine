@@ -18,14 +18,19 @@ load_dotenv()
 # ============================================
 # CONFIGURATION
 # ============================================
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SUPABASE_SERVICE_ROLE = os.getenv('SUPABASE_SERVICE_ROLE')
+SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://mydbvqyxoxqzluslpavh.supabase.co')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'sb_publishable_7An_A_PQbrrTzpyrSKOEgw_dPf5mj_o')
+# Service role key - bypasses all RLS policies
+SUPABASE_SERVICE_ROLE = os.getenv('SUPABASE_SERVICE_ROLE', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15ZGJ2cXl4b3hxemx1c2xwYXZoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4Nzk5MTA2MCwiZXhwIjoyMTAzNTY3MDYwfQ.fEwC1A72dyadslnC8x6JFBLGiVriRVNCCQA3244sVQw')
 JWT_SECRET = os.getenv('JWT_SECRET', secrets.token_hex(32))
 JWT_EXPIRATION = 3600 * 24 * 7  # 7 days
 
-# Initialize Supabase client with service role
-supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE or SUPABASE_KEY)
+# Initialize Supabase client with SERVICE ROLE (bypasses RLS)
+# The service role key allows ALL operations regardless of RLS policies
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+
+print(f"✅ Supabase initialized with SERVICE ROLE")
+print(f"📡 URL: {SUPABASE_URL}")
 
 # ============================================
 # PASSWORD HASHING (without bcrypt)
